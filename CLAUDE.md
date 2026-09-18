@@ -68,6 +68,19 @@ Concretely, four things carry that weight. Don't undo them without a reason:
 - **Hue is 0–360; saturation and brightness are 0–100.** Mismatched ranges are a
   classic source of wrong colours.
 
+## Simulator fidelity
+
+The simulator is only useful while it fails the way hardware fails. Two gaps
+found by running the app against it, both fixed:
+
+- **SSE keepalives.** Real controllers dribble traffic down an idle event
+  stream; the client watchdog treats 60s of total silence as a wedged socket.
+  A simulator that sent nothing made a quiet device flap between connected and
+  reconnecting, which looked like an app bug and was not.
+- **Factory effects need bodies.** `info.effects.effectsList` holds names, but
+  `requestAll` must return full documents for them too. Storing only effects
+  written through the API made export come back empty on a fresh device.
+
 ## Open questions for hardware
 
 Marked `TODO(hardware)` in the source. Community sources disagree and the

@@ -6,7 +6,7 @@ import {
   deriveCapabilities,
   type DeviceCapabilities,
 } from '../model/capabilities.js';
-import { NanoleafAuthError } from '../model/errors.js';
+import { NanoleafAuthError, NanoleafHttpError } from '../model/errors.js';
 import {
   flattenState,
   type ConnectionStatus,
@@ -14,6 +14,7 @@ import {
   type DeviceRecord,
   type PanelColor,
   type PanelLayout,
+  type RhythmInfo,
   type StatePatch,
   type StateSnapshot,
   type StreamVersion,
@@ -21,8 +22,15 @@ import {
 import { StreamController } from '../stream/extcontrol.js';
 import {
   buildDeleteEffect,
+  buildEffectWrite,
+  buildRequestAllEffects,
+  buildRequestEffect,
+  buildRequestPlugins,
   buildSelectEffect,
   buildStaticEffectWrite,
+  effectCompatibility,
+  isNanoleafEffect,
+  type NanoleafEffect,
 } from './effects.js';
 
 /** After this many failed reconnects we stop claiming to be merely reconnecting. */
@@ -85,6 +93,7 @@ export class NanoleafDevice extends EventEmitter<DeviceEvents> {
   // before it is open is exactly the kind of lie this app exists to avoid.
   #status: ConnectionStatus = 'reconnecting';
   #streamVersion: StreamVersion | undefined;
+  #rhythm: RhythmInfo | undefined;
 
   #events: EventStream | undefined;
   #stream: StreamController | undefined;
@@ -105,6 +114,7 @@ export class NanoleafDevice extends EventEmitter<DeviceEvents> {
     this.#effects = info.effects.effectsList ?? [];
     this.#currentEffect = info.effects.select;
     this.#streamVersion = record.streamVersion;
+    this.#rhythm = info.rhythm;
 
     this.#client = new NanoleafClient({
       host: record.lastIp,
@@ -143,6 +153,16 @@ export class NanoleafDevice extends EventEmitter<DeviceEvents> {
   }
   get status(): ConnectionStatus {
     return this.#status;
+  }
+  /**
+   * What the device says about its Rhythm module, if anything.
+   *
+   * Distinct from `capabilities.rhythm`, which only says the model *can*
+   * take one. Whether a module is actually plugged in is a different question
+   * and only the device can answer it.
+   */
+  get rhythm(): RhythmInfo | undefined {
+    return this.#rhythm;
   }
   get streamVersion(): StreamVersion | undefined {
     return this.#streamVersion;
@@ -374,6 +394,69 @@ export class NanoleafDevice extends EventEmitter<DeviceEvents> {
     this.#effects = this.#effects.filter((e) => e !== name);
   }
 
+  /**
+   * Every effect stored on this device, in the device's own format.
+   *
+   * The same shape `importEffect` accepts, so this is both a backup and the way
+   * an effect moves from one device to another.
+   */
+  async exportEffects(): Promise<NanoleafEffect[]> {
+    const res = await this.#client.put<unknown>('/effects', buildRequestAllEffects());
+    return extractEffects(res);
+  }
+
+  /** One effect by name, or undefined if the device does not have it. */
+  async exportEffect(name: string): Promise<NanoleafEffect | undefined> {
+    let res: unknown;
+    try {
+      res = await this.#client.put<unknown>('/effects', buildRequestEffect(name));
+    } catch (err) {
+      // Asking for an effect that is not there is an answer, not a failure, and
+      // firmware differs on how it says so. An auth error is a different kind
+      // of thing and still propagates: NanoleafAuthError is not an HttpError.
+      if (err instanceof NanoleafHttpError) return undefined;
+      throw err;
+    }
+    if (isNanoleafEffect(res)) return res;
+    return extractEffects(res).find((e) => e.animName === name);
+  }
+
+  /**
+   * The motion plugin uuids this device actually has.
+   *
+   * Returns an empty list if the device does not answer the question — older
+   * firmware may not — which callers treat as "unknown", not "none".
+   */
+  async listPlugins(): Promise<string[]> {
+    try {
+      const res = await this.#client.put<unknown>('/effects', buildRequestPlugins());
+      return extractPluginUuids(res);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Write an effect onto this device.
+   *
+   * Checks the device's plugin list first. Writing an effect whose motion the
+   * device lacks otherwise fails as a bare HTTP 400, which says nothing about
+   * which motion was missing or that the model is the problem.
+   */
+  async importEffect(effect: NanoleafEffect): Promise<void> {
+    if (!isNanoleafEffect(effect)) {
+      throw new Error('That does not look like a Nanoleaf effect.');
+    }
+
+    const incompatible = effectCompatibility(effect, await this.listPlugins());
+    if (incompatible) throw new Error(incompatible);
+
+    await this.#client.put('/effects', buildEffectWrite(effect));
+    if (!this.#effects.includes(effect.animName)) {
+      this.#effects = [...this.#effects, effect.animName];
+    }
+  }
+
   // --- streaming ------------------------------------------------------------
 
   /** Enter external-control mode, remembering which protocol version worked. */
@@ -430,4 +513,43 @@ export class NanoleafDevice extends EventEmitter<DeviceEvents> {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+/**
+ * Pull effects out of a `requestAll` / `request` response.
+ *
+ * Firmware versions disagree on the wrapper — some return `{animations: [...]}`,
+ * some a bare array, some a single object — so accept all three rather than
+ * guessing which one this unit speaks.
+ */
+function extractEffects(res: unknown): NanoleafEffect[] {
+  if (Array.isArray(res)) return res.filter(isNanoleafEffect);
+  if (typeof res === 'object' && res !== null) {
+    const wrapper = res as Record<string, unknown>;
+    for (const key of ['animations', 'effects']) {
+      const value = wrapper[key];
+      if (Array.isArray(value)) return value.filter(isNanoleafEffect);
+    }
+    if (isNanoleafEffect(res)) return [res];
+  }
+  return [];
+}
+
+/** Plugin uuids from a `requestPlugins` response, tolerating the same variation. */
+function extractPluginUuids(res: unknown): string[] {
+  const list = Array.isArray(res)
+    ? res
+    : typeof res === 'object' && res !== null
+      ? ((res as Record<string, unknown>)['plugins'] ?? [])
+      : [];
+  if (!Array.isArray(list)) return [];
+
+  return list.flatMap((entry) => {
+    if (typeof entry === 'string') return [entry];
+    if (typeof entry === 'object' && entry !== null) {
+      const uuid = (entry as Record<string, unknown>)['uuid'];
+      if (typeof uuid === 'string') return [uuid];
+    }
+    return [];
+  });
 }

@@ -9,18 +9,34 @@ const canvasLayout = (): PanelLayout =>
   PROFILES.NL29.info().panelLayout.layout;
 
 describe('panel filtering', () => {
-  it('drops the Rhythm module from an Aurora layout', () => {
+  it('drops a Rhythm pseudo-panel when firmware reports one', () => {
+    // A real NL22 with a Rhythm module attached does NOT list it in
+    // positionData — verified against hardware reporting rhythmConnected
+    // alongside exactly nine panels. Community reports of firmware that does
+    // include it are why this filter exists, so the case is constructed here
+    // rather than taken from a profile that now mirrors the real device.
+    const layout: PanelLayout = {
+      numPanels: 3,
+      sideLength: 150,
+      positionData: [
+        { panelId: 96, x: 0, y: 0, o: 0, shapeType: ShapeType.Triangle },
+        { panelId: 0, x: 0, y: -150, o: 0, shapeType: ShapeType.Rhythm },
+        { panelId: 135, x: 150, y: 0, o: 180, shapeType: ShapeType.Triangle },
+      ],
+    };
+
+    const lit = illuminatedPanels(layout);
+    expect(lit).toHaveLength(2);
+    expect(lit.map((p) => p.panelId)).toEqual([96, 135]);
+  });
+
+  it('matches real NL22 hardware: nine panels, no Rhythm entry', () => {
     const layout = auroraLayout();
-    // The firmware reports the Rhythm alongside real panels...
-    expect(layout.positionData).toHaveLength(10);
+    expect(layout.positionData).toHaveLength(9);
     expect(
       layout.positionData.some((p) => p.shapeType === ShapeType.Rhythm),
-    ).toBe(true);
-
-    // ...but it has no LEDs, so it must not occupy a slot in a frame.
-    const lit = illuminatedPanels(layout);
-    expect(lit).toHaveLength(9);
-    expect(lit.some((p) => p.shapeType === ShapeType.Rhythm)).toBe(false);
+    ).toBe(false);
+    expect(illuminatedPanels(layout)).toHaveLength(9);
   });
 
   it('keeps the Canvas control square, which does light up', () => {
@@ -37,7 +53,7 @@ describe('panel filtering', () => {
   it('streamable ids match the illuminated panels exactly', () => {
     const ids = streamablePanelIds(auroraLayout());
     expect(ids).toHaveLength(9);
-    // panelId 0 is the Rhythm in this layout and must not be addressed.
+    // No pseudo-panel id (0) can appear, on this profile or a real device.
     expect(ids).not.toContain(0);
   });
 
@@ -95,8 +111,8 @@ describe('toRenderLayout', () => {
   });
 
   it('excludes pseudo-panels from the bounding box', () => {
-    // The Rhythm in the fixture sits above every real panel. If it leaked into
-    // the bounds the render would have a blank strip at the top.
+    // Three rows of triangles at 150 spacing. Any pseudo-panel that leaked
+    // into the bounds would stretch this and leave a blank strip in the render.
     const render = toRenderLayout(auroraLayout());
     expect(render.panels).toHaveLength(9);
     expect(render.bounds.height).toBe(300);

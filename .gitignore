@@ -18,3 +18,6 @@ coverage/
 Thumbs.db
 .env
 .env.local
+
+# Effect exports land wherever you run the CLI; not repo content.
+*-effects.json

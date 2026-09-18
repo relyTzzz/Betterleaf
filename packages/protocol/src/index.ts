@@ -39,10 +39,24 @@ export { pairDevice, unpairDevice } from './device/pairing.js';
 export type { PairOptions } from './device/pairing.js';
 export {
   encodeAnimData,
+  buildEffectWrite,
   buildStaticEffectWrite,
   buildSelectEffect,
   buildDeleteEffect,
   buildTempEffect,
+  buildRequestAllEffects,
+  buildRequestEffect,
+  buildRequestPlugins,
+  isNanoleafEffect,
+  effectCompatibility,
+  motionByUuid,
+  BUILTIN_MOTIONS,
+} from './device/effects.js';
+export type {
+  NanoleafEffect,
+  PaletteColor,
+  PluginOption,
+  BuiltinMotion,
 } from './device/effects.js';
 export { toRenderLayout, streamablePanelIds, panelShapeKind } from './device/layout.js';
 export type { RenderLayout, RenderPanel, LayoutBounds, PanelShapeKind } from './device/layout.js';

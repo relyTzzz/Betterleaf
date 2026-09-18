@@ -134,6 +134,24 @@ describe('EventStream', () => {
     expect(patches).toEqual([{ brightness: 88 }]);
   });
 
+  it('stays connected on an idle stream, because keepalives arrive', async () => {
+    // The watchdog treats total silence as a wedged socket, which is right:
+    // real controllers dribble keepalive traffic even when nothing happens.
+    // A device that goes quiet must not therefore look like it dropped.
+    const sim = await startSimulator({ profile: 'NL29', keepaliveMs: 50 });
+    cleanups.push(() => sim.stop());
+    const es = await stream(sim);
+
+    let reconnects = 0;
+    es.on('reconnecting', () => reconnects++);
+
+    // Far longer than the keepalive interval, with no events at all.
+    await new Promise((r) => setTimeout(r, 400));
+
+    expect(reconnects).toBe(0);
+    expect(es.connected).toBe(true);
+  });
+
   it('stops reconnecting once closed', async () => {
     const sim = await startSimulator({ profile: 'NL29' });
     cleanups.push(() => sim.stop());

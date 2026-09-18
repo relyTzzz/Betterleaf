@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { EventEmitter } from 'node:events';
 import type { DeviceInfo, PanelColor, StreamVersion } from '@betterleaf/protocol';
 import { decodeFrame } from './decode.js';
-import { PROFILES, type ProfileName } from './profiles.js';
+import { PROFILES, defaultEffectDocs, type ProfileName } from './profiles.js';
 
 export interface SimulatorOptions {
   profile: ProfileName;
@@ -26,6 +26,8 @@ export interface SimulatorOptions {
   streamPort?: number;
   /** Report `streamControlPort` in the extControl response, like Light Panels do. */
   reportsStreamPort?: boolean;
+  /** How often to send SSE keepalive traffic. 0 disables it, to exercise the client watchdog. */
+  keepaliveMs?: number;
 }
 
 export interface ReceivedFrame {
@@ -66,6 +68,13 @@ export class NanoleafSimulator extends EventEmitter<SimEvents> {
   #udp: dgram.Socket | undefined;
   #bonjour: { destroy: () => void } | undefined;
 
+  /**
+   * Full effect documents, keyed by name. `info.effects.effectsList` holds only
+   * the names, exactly as the real API does, so `requestAll` has somewhere to
+   * read the bodies from.
+   */
+  #storedEffects = new Map<string, Record<string, unknown>>();
+
   #sseClients = new Set<http.ServerResponse>();
   #streamVersion: StreamVersion | undefined;
   #configuredStreamPort: number;
@@ -77,18 +86,32 @@ export class NanoleafSimulator extends EventEmitter<SimEvents> {
   #port = 0;
   #udpPort = 0;
   #stopped = false;
+  readonly #keepaliveMs: number;
 
   constructor(private readonly opts: SimulatorOptions) {
     super();
     // Copy, so one simulator instance can be reconfigured (or misconfigured by
     // a test) without corrupting the shared profile for every other instance.
     const template = PROFILES[opts.profile];
-    this.profile = { ...template, streamVersions: [...template.streamVersions] };
+    this.profile = {
+      ...template,
+      streamVersions: [...template.streamVersions],
+      plugins: [...template.plugins],
+    };
     this.#info = this.profile.info();
     this.#token = opts.token ?? 'sim-token-' + Math.random().toString(36).slice(2, 10);
     this.#pairingOpen = opts.pairingOpen ?? false;
     this.#configuredStreamPort = opts.streamPort ?? 0;
     this.#reportsStreamPort = opts.reportsStreamPort ?? opts.profile === 'NL22';
+    this.#keepaliveMs = opts.keepaliveMs ?? 15_000;
+    // The factory effects need bodies, not just names, or requestAll comes
+    // back empty on a device nobody has written to yet.
+    for (const [name, doc] of Object.entries(
+      defaultEffectDocs(this.#info.effects.effectsList),
+    )) {
+      this.#storedEffects.set(name, doc);
+    }
+
     this.#server = http.createServer((req, res) => this.#handle(req, res));
   }
 
@@ -430,8 +453,44 @@ export class NanoleafSimulator extends EventEmitter<SimEvents> {
       return;
     }
 
+    if (write['command'] === 'requestAll') {
+      this.#send(res, 200, { animations: [...this.#storedEffects.values()] });
+      return;
+    }
+
+    if (write['command'] === 'request') {
+      const stored = this.#storedEffects.get(String(write['animName'] ?? ''));
+      if (!stored) {
+        this.#send(res, 404, { error: 'no such effect' });
+        return;
+      }
+      this.#send(res, 200, stored);
+      return;
+    }
+
+    if (write['command'] === 'requestPlugins') {
+      this.#send(res, 200, { plugins: this.profile.plugins });
+      return;
+    }
+
     if (write['command'] === 'add') {
       const name = String(write['animName'] ?? 'Unnamed');
+
+      // A real device rejects an effect whose motion it does not have. This is
+      // the failure the client's compatibility check exists to pre-empt, and it
+      // is deliberately as unhelpful here as the hardware's is.
+      const uuid = write['pluginUuid'];
+      if (
+        write['animType'] === 'plugin' &&
+        typeof uuid === 'string' &&
+        !this.profile.plugins.some((p) => p.uuid === uuid)
+      ) {
+        this.#send(res, 400, { error: 'bad request' });
+        return;
+      }
+
+      const { command: _command, ...effect } = write;
+      this.#storedEffects.set(name, effect);
       if (!this.#info.effects.effectsList.includes(name)) {
         this.#info.effects.effectsList.push(name);
       }
@@ -441,6 +500,7 @@ export class NanoleafSimulator extends EventEmitter<SimEvents> {
 
     if (write['command'] === 'delete') {
       const name = String(write['animName'] ?? '');
+      this.#storedEffects.delete(name);
       this.#info.effects.effectsList = this.#info.effects.effectsList.filter(
         (e) => e !== name,
       );
@@ -459,7 +519,21 @@ export class NanoleafSimulator extends EventEmitter<SimEvents> {
     });
     res.write('\n');
     this.#sseClients.add(res);
-    res.on('close', () => this.#sseClients.delete(res));
+    // Real controllers dribble keepalive traffic down an idle stream, which is
+    // why the client watchdog treats total silence as a wedged socket. Without
+    // this the simulator looks healthy but still trips that watchdog every 60s,
+    // so a quiet device appears to flap between connected and reconnecting.
+    const keepalive = this.#keepaliveMs > 0
+      ? setInterval(() => {
+          if (!res.writableEnded) res.write(': keepalive\n\n');
+        }, this.#keepaliveMs)
+      : undefined;
+    keepalive?.unref?.();
+
+    res.on('close', () => {
+      if (keepalive) clearInterval(keepalive);
+      this.#sseClients.delete(res);
+    });
   }
 
   #send(res: http.ServerResponse, status: number, body?: unknown): void {

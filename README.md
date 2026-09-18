@@ -2,6 +2,10 @@
 
 A better controller for Nanoleaf lighting products. Local-only — no cloud, no account.
 
+Lights can be grouped into **rooms**, and effects can be **exported from one
+device and imported into another** — so a scene authored on the Canvas can be
+copied to the Light Panels without going near a marketplace.
+
 The official app is slow and unreliable at the one thing it has to do: find the
 lights and change them. Betterleaf treats that as the product. Discovery races a
 cached-address probe against mDNS, devices are identified by serial number so a
@@ -129,6 +133,10 @@ A target matches a serial prefix, a model number, or part of the name, so
 | `effects [target] [name]` | List effects, or apply one |
 | `layout [target]` | Panel positions, and what gets filtered out |
 | `identify [target]` | Flash the panels |
+| `plugins [target]` | Motions this device actually has |
+| `motions` | Built-in motions effects can be authored from |
+| `export-effects [target] [file]` | Save every effect on the device to JSON |
+| `import-effect <target> <file> [--name X]` | Write effects from a file onto the device |
 | `watch [target]` | Live event stream |
 | `stream [target] [--seconds N] [--restore <effect>]` | Stream over UDP |
 | `save-scene [target] [name]` | Write a scene onto the device permanently |

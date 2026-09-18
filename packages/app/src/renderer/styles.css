@@ -418,3 +418,146 @@ input[type='range'].ct {
   color: var(--bad);
   margin-bottom: 14px;
 }
+
+/* --- rooms ---------------------------------------------------------------- */
+
+.room-block {
+  margin-bottom: 10px;
+}
+
+.room-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 7px 10px;
+  margin-bottom: 2px;
+}
+.room-header:hover {
+  background: var(--bg-raised);
+}
+.room-header.selected {
+  background: var(--bg-raised);
+  border-color: var(--accent-dim);
+}
+.room-header .room-name {
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.9px;
+  color: var(--text-dim);
+}
+.room-header .room-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* Devices inside a room sit under their header rather than floating loose. */
+.device-card.indented {
+  margin-left: 10px;
+  width: calc(100% - 10px);
+}
+
+.room-empty {
+  margin: 0 0 4px 22px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.room-input,
+.add-room {
+  width: 100%;
+  margin-top: 6px;
+}
+.add-room {
+  color: var(--text-faint);
+  border-style: dashed;
+}
+.add-room:hover {
+  color: var(--text);
+}
+
+.room-picker {
+  font: inherit;
+  color: var(--text-dim);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 6px 9px;
+}
+.room-picker:hover {
+  border-color: var(--accent-dim);
+}
+
+.member-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.member {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.member .member-name {
+  font-weight: 550;
+}
+.member .member-state {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.detail-head input[type='text'] {
+  font-size: 20px;
+  font-weight: 600;
+  padding: 3px 8px;
+  margin-bottom: 5px;
+}
+
+.footnote {
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 22px 2px 0;
+  max-width: 60ch;
+}
+
+.effects-note {
+  color: var(--text-faint);
+  font-size: 12.5px;
+  margin: 12px 0 0;
+}
+
+.import-result {
+  margin-top: 14px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.import-result p {
+  margin: 0 0 6px;
+}
+.import-result .ok {
+  color: var(--ok);
+}
+.import-result .warn {
+  color: var(--warn);
+}
+.import-result ul {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-dim);
+}
+.import-result li + li {
+  margin-top: 4px;
+}

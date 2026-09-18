@@ -4,9 +4,12 @@ import {
   pairDevice,
   probeDevice,
   runDiscoveryLadder,
+  BUILTIN_MOTIONS,
   panelShapeKind,
   toRenderLayout,
+  type ConnectionStatus,
   type DeviceRecord,
+  type LadderOptions,
   type ProbeResult,
 } from '@betterleaf/protocol';
 import type {
@@ -14,10 +17,37 @@ import type {
   DeviceView,
   DiscoveryState,
   PairProgress,
+  MotionView,
   PairResult,
+  Room,
+  RoomView,
   UnpairedDeviceView,
 } from '../shared/types.js';
+import {
+  copyEffectsBetween,
+  exportEffectsToFile,
+  importEffectsFromFile,
+  type ExportOutcome,
+  type ImportOutcome,
+} from './effects/file-source.js';
+import { RoomStore } from './room-store.js';
 import { DeviceStore } from './store.js';
+
+/**
+ * Worst-first ranking, so a room's status is the one that most needs attention.
+ * A room must never look healthier than the devices in it.
+ */
+const STATUS_SEVERITY: Record<ConnectionStatus, number> = {
+  connected: 0,
+  reconnecting: 1,
+  unreachable: 2,
+  'needs-pairing': 3,
+};
+
+/** Unknown statuses sort as worst, so a room never flatters an unfamiliar state. */
+function severity(status: ConnectionStatus): number {
+  return STATUS_SEVERITY[status] ?? Number.MAX_SAFE_INTEGER;
+}
 
 type RegistryEvents = {
   snapshot: [AppSnapshot];
@@ -34,15 +64,41 @@ type RegistryEvents = {
  */
 export class DeviceRegistry extends EventEmitter<RegistryEvents> {
   readonly #store: DeviceStore;
+  readonly #rooms: RoomStore;
   readonly #devices = new Map<string, NanoleafDevice>();
 
   #unpaired: UnpairedDeviceView[] = [];
   #discovery: DiscoveryState = { scanning: false };
   #pairAbort: AbortController | undefined;
+  /**
+   * In-memory mirror of the room store, so `snapshot()` stays synchronous.
+   * Every mutation refreshes it from the store rather than editing it directly,
+   * so disk and memory cannot drift apart.
+   */
+  #roomList: Room[] = [];
 
-  constructor(store = new DeviceStore()) {
+  /**
+   * Which discovery rungs to use. Exists so a user on a network where a subnet
+   * sweep is unwelcome can turn it off, and so tests can avoid depending on
+   * whatever happens to be advertising on the real network.
+   */
+  readonly #discoveryOptions: Pick<
+    LadderOptions,
+    'enableMdns' | 'enableSsdp' | 'enableSweep' | 'timings'
+  >;
+
+  constructor(
+    store = new DeviceStore(),
+    rooms = new RoomStore(),
+    discoveryOptions: Pick<
+      LadderOptions,
+      'enableMdns' | 'enableSsdp' | 'enableSweep' | 'timings'
+    > = {},
+  ) {
     super();
     this.#store = store;
+    this.#rooms = rooms;
+    this.#discoveryOptions = discoveryOptions;
   }
 
   /**
@@ -53,6 +109,7 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
    */
   async start(): Promise<void> {
     const known = await this.#store.load();
+    this.#roomList = await this.#rooms.load();
     await this.scan(known);
   }
 
@@ -66,6 +123,7 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
 
     try {
       await runDiscoveryLadder({
+        ...this.#discoveryOptions,
         known: records,
         onRung: (rung) => {
           this.#discovery = { ...this.#discovery, rung };
@@ -183,7 +241,126 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
       this.#devices.delete(serialNo);
     }
     await this.#store.remove(serialNo);
+    // A forgotten device must not linger as a phantom member of a room.
+    await this.#rooms.pruneDevice(serialNo);
+    this.#roomList = await this.#rooms.load();
     this.#publish();
+  }
+
+  // --- effects ---------------------------------------------------------------
+
+  exportEffects(serialNo: string): Promise<ExportOutcome> {
+    return exportEffectsToFile(this.#device(serialNo));
+  }
+
+  async importEffects(serialNo: string): Promise<ImportOutcome> {
+    const outcome = await importEffectsFromFile(this.#device(serialNo));
+    if (outcome.imported.length > 0) this.#publish();
+    return outcome;
+  }
+
+  async copyEffects(fromSerialNo: string, toSerialNo: string): Promise<ImportOutcome> {
+    const outcome = await copyEffectsBetween(
+      this.#device(fromSerialNo),
+      this.#device(toSerialNo),
+    );
+    if (outcome.imported.length > 0) this.#publish();
+    return outcome;
+  }
+
+  /**
+   * The built-in motions, marked with whether this device actually has each one.
+   *
+   * Authoring against a motion the device lacks would produce an effect it
+   * cannot render, so the UI needs to know before offering the choice.
+   */
+  async listMotions(serialNo: string): Promise<MotionView[]> {
+    const available = await this.#device(serialNo).listPlugins();
+    return BUILTIN_MOTIONS.map((motion) => ({
+      id: motion.id,
+      label: motion.label,
+      uuid: motion.uuid,
+      pluginType: motion.pluginType,
+      description: motion.description,
+      // An empty list means the device did not answer, not that it has nothing.
+      available: available.length === 0 || available.includes(motion.uuid),
+    }));
+  }
+
+  // --- rooms -----------------------------------------------------------------
+
+  async createRoom(name: string): Promise<string> {
+    const room = await this.#rooms.create(name);
+    await this.#refreshRooms();
+    return room.id;
+  }
+
+  async renameRoom(roomId: string, name: string): Promise<void> {
+    await this.#rooms.rename(roomId, name);
+    await this.#refreshRooms();
+  }
+
+  async deleteRoom(roomId: string): Promise<void> {
+    await this.#rooms.remove(roomId);
+    await this.#refreshRooms();
+  }
+
+  async reorderRooms(roomIds: string[]): Promise<void> {
+    await this.#rooms.reorder(roomIds);
+    await this.#refreshRooms();
+  }
+
+  async assignDevice(serialNo: string, roomId: string | null): Promise<void> {
+    await this.#rooms.assign(serialNo, roomId);
+    await this.#refreshRooms();
+  }
+
+  async #refreshRooms(): Promise<void> {
+    this.#roomList = await this.#rooms.load();
+    this.#publish();
+  }
+
+  /** Connected members of a room, in the order the room lists them. */
+  #membersOf(roomId: string): NanoleafDevice[] {
+    const room = this.#roomList.find((r) => r.id === roomId);
+    if (!room) return [];
+    return room.deviceSerials.flatMap((serial) => {
+      const device = this.#devices.get(serial);
+      return device ? [device] : [];
+    });
+  }
+
+  /**
+   * Apply an operation to every member of a room.
+   *
+   * Fans out to each device's own WriteQueue rather than introducing a queue of
+   * its own, so per-device coalescing still applies and dragging a room
+   * brightness slider is still a handful of requests per device.
+   *
+   * `allSettled`, not `all`: one unreachable device must not stop the rest of
+   * the room from responding.
+   */
+  async #fanOut(
+    roomId: string,
+    op: (device: NanoleafDevice) => Promise<void>,
+  ): Promise<void> {
+    await Promise.allSettled(this.#membersOf(roomId).map(op));
+  }
+
+  setRoomPower(roomId: string, on: boolean): Promise<void> {
+    return this.#fanOut(roomId, (d) => d.setPower(on));
+  }
+
+  setRoomBrightness(roomId: string, value: number): Promise<void> {
+    return this.#fanOut(roomId, (d) => d.setBrightness(value));
+  }
+
+  setRoomEffect(roomId: string, name: string): Promise<void> {
+    // Only shared effects are offered, but guard anyway: a device can gain or
+    // lose effects while the UI is open.
+    return this.#fanOut(roomId, async (d) => {
+      if (d.effects.includes(name)) await d.selectEffect(name);
+    });
   }
 
   // --- pairing ---------------------------------------------------------------
@@ -243,11 +420,58 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
   // --- snapshot --------------------------------------------------------------
 
   snapshot(): AppSnapshot {
+    const roomOf = new Map<string, string>();
+    for (const room of this.#roomList) {
+      for (const serial of room.deviceSerials) roomOf.set(serial, room.id);
+    }
+
     return {
-      devices: [...this.#devices.values()].map(toView),
+      devices: [...this.#devices.values()].map((device) =>
+        toView(device, roomOf.get(device.serialNo)),
+      ),
+      rooms: this.#roomList.map((room) => this.#toRoomView(room)),
       unpaired: this.#unpaired,
       discovery: this.#discovery,
     };
+  }
+
+  #toRoomView(room: Room): RoomView {
+    const members = this.#membersOf(room.id);
+    const lit = members.filter((d) => d.state.on);
+
+    // Only claim a room-wide effect when every member agrees on it.
+    const first = members[0]?.currentEffect;
+    const agreed =
+      members.length > 0 && members.every((d) => d.currentEffect === first)
+        ? first
+        : undefined;
+
+    const view: RoomView = {
+      id: room.id,
+      name: room.name,
+      order: room.order,
+      deviceSerials: members.map((d) => d.serialNo),
+      on: lit.length > 0,
+      brightness:
+        lit.length > 0
+          ? Math.round(
+              lit.reduce((sum, d) => sum + d.state.brightness, 0) / lit.length,
+            )
+          : 0,
+      status: members.reduce<ConnectionStatus>(
+        (worst, d) => (severity(d.status) > severity(worst) ? d.status : worst),
+        'connected',
+      ),
+      // Intersection: an effect only one member has cannot be applied room-wide,
+      // so offering it would give a partial, confusing result.
+      effects: members.reduce<string[]>(
+        (shared, d, i) =>
+          i === 0 ? [...d.effects] : shared.filter((e) => d.effects.includes(e)),
+        [],
+      ),
+    };
+    if (agreed !== undefined) view.currentEffect = agreed;
+    return view;
   }
 
   #publish(): void {
@@ -261,7 +485,7 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
   }
 }
 
-function toView(device: NanoleafDevice): DeviceView {
+function toView(device: NanoleafDevice, roomId?: string): DeviceView {
   const render = toRenderLayout(device.layout);
   const view: DeviceView = {
     serialNo: device.serialNo,
@@ -292,5 +516,6 @@ function toView(device: NanoleafDevice): DeviceView {
     },
   };
   if (device.streamVersion) view.streamVersion = device.streamVersion;
+  if (roomId) view.roomId = roomId;
   return view;
 }

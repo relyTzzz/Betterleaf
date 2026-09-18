@@ -11,17 +11,79 @@ export interface Profile {
   /** mDNS service type this vintage advertises. */
   mdnsType: 'nanoleafapi' | 'nanoleafms';
   supportsTouch: boolean;
+  /** Motion plugins this device reports from `requestPlugins`. */
+  plugins: { uuid: string; name: string; type: 'color' | 'rhythm' }[];
 }
 
 /**
- * Light Panels (Aurora) layout: nine triangles plus the Rhythm module.
+ * The six motions every controller ships with.
+ *
+ * Kept as literals rather than imported from the protocol package: the
+ * simulator stands in for the hardware, and a fake device that derives its
+ * capabilities from the client under test would prove nothing.
+ */
+const COLOR_PLUGINS = [
+  { uuid: '6970681a-20b5-4c5e-8813-bdaebc4ee4fa', name: 'Wheel', type: 'color' as const },
+  { uuid: '027842e4-e1d6-4a4c-a731-be74a1ebd4cf', name: 'Flow', type: 'color' as const },
+  { uuid: '713518c1-d560-47db-8991-de780af71d1e', name: 'Explode', type: 'color' as const },
+  { uuid: 'b3fd723a-aae8-4c99-bf2b-087159e0ef53', name: 'Fade', type: 'color' as const },
+  { uuid: 'ba632d3e-9c2b-4413-a965-510c839b3f71', name: 'Random', type: 'color' as const },
+  { uuid: '70b7c636-6bf8-491f-89c1-f4103508d642', name: 'Highlight', type: 'color' as const },
+];
+
+/**
+ * Sound-reactive motions, which need a Rhythm module. Only the Light Panels
+ * have one, so this is what makes a rhythm effect genuinely un-importable onto
+ * the Canvas rather than hypothetically so.
+ */
+const RHYTHM_PLUGINS = [
+  { uuid: 'bc6fe7e0-36d4-4f95-aa21-52a386daa9dc', name: 'Pulse Pop Beats', type: 'rhythm' as const },
+  { uuid: 'ba632d3e-9c2b-4413-a965-510c839b3f72', name: 'Sound Bar', type: 'rhythm' as const },
+];
+
+/**
+ * Full documents for the factory effects.
+ *
+ * A real controller's `requestAll` returns every effect it holds, including the
+ * ones it shipped with. A simulator that only returns effects written through
+ * the API would make export look empty on a fresh device, and hide the fact
+ * that copying between devices should carry the built-ins too.
+ */
+export function defaultEffectDocs(
+  names: readonly string[],
+): Record<string, Record<string, unknown>> {
+  const docs: Record<string, Record<string, unknown>> = {};
+  names.forEach((name, i) => {
+    const motion = COLOR_PLUGINS[i % COLOR_PLUGINS.length]!;
+    docs[name] = {
+      version: '2.0',
+      animName: name,
+      animType: 'plugin',
+      colorType: 'HSB',
+      pluginType: 'color',
+      pluginUuid: motion.uuid,
+      pluginOptions: [
+        { name: 'transTime', value: 20 },
+        { name: 'loop', value: true },
+      ],
+      palette: [
+        { hue: (i * 53) % 360, saturation: 90, brightness: 100 },
+        { hue: (i * 53 + 140) % 360, saturation: 80, brightness: 70 },
+      ],
+      loop: true,
+    };
+  });
+  return docs;
+}
+
+/** * Light Panels (Aurora) layout: nine triangles plus the Rhythm module.
  *
  * The Rhythm is the interesting part. Firmware reports it in `positionData`
  * exactly like a real panel even though it has no LEDs, so any code that treats
  * `positionData` as "the panels" gets the count wrong and shifts every colour by
  * one. Keeping it here means the test suite catches that rather than the wall.
  */
-function auroraPanels(): PanelPosition[] {
+function auroraPanels(withRhythmPanel = false): PanelPosition[] {
   const side = 150;
   const panels: PanelPosition[] = [];
   // Panel ids on a real Aurora are arbitrary small integers — and crucially all
@@ -38,13 +100,13 @@ function auroraPanels(): PanelPosition[] {
       shapeType: ShapeType.Triangle,
     });
   }
-  panels.push({
-    panelId: 0,
-    x: 0,
-    y: -side,
-    o: 0,
-    shapeType: ShapeType.Rhythm,
-  });
+  // A real NL22 with a Rhythm module attached does NOT list it here —
+  // verified against hardware reporting rhythmConnected with nine panels in
+  // positionData. Community reports of firmware that does include it are
+  // why the filter exists, so this stays available to exercise that path.
+  if (withRhythmPanel) {
+    panels.push({ panelId: 0, x: 0, y: -side, o: 0, shapeType: ShapeType.Rhythm });
+  }
   return panels;
 }
 
@@ -118,6 +180,7 @@ export const PROFILES: Record<ProfileName, Profile> = {
     name: 'NL22',
     mdnsType: 'nanoleafms',
     supportsTouch: false,
+    plugins: [...COLOR_PLUGINS, ...RHYTHM_PLUGINS],
     // Recent Aurora firmware accepts v2 as well, which is exactly why the
     // stream controller probes instead of trusting the model number.
     streamVersions: ['v1'],
@@ -146,6 +209,8 @@ export const PROFILES: Record<ProfileName, Profile> = {
     name: 'NL29',
     mdnsType: 'nanoleafapi',
     supportsTouch: true,
+    // No Rhythm module, so no sound-reactive motions.
+    plugins: [...COLOR_PLUGINS],
     streamVersions: ['v2'],
     info: () =>
       baseInfo('Canvas EEE0', 'NL29', 'S20233CD5678', '1.3.1', canvasPanels(), 100),

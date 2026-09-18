@@ -46,6 +46,37 @@ function registerIpc(): void {
   ipcMain.handle(IPC.snapshot, () => registry.snapshot());
   ipcMain.handle(IPC.rescan, () => registry.scan());
 
+  ipcMain.handle(IPC.createRoom, (_e, name: string) => registry.createRoom(name));
+  ipcMain.handle(IPC.renameRoom, (_e, id: string, name: string) =>
+    registry.renameRoom(id, name),
+  );
+  ipcMain.handle(IPC.deleteRoom, (_e, id: string) => registry.deleteRoom(id));
+  ipcMain.handle(IPC.reorderRooms, (_e, ids: string[]) => registry.reorderRooms(ids));
+  ipcMain.handle(IPC.assignDevice, (_e, serial: string, roomId: string | null) =>
+    registry.assignDevice(serial, roomId),
+  );
+
+  ipcMain.handle(IPC.setRoomPower, (_e, id: string, on: boolean) =>
+    registry.setRoomPower(id, on),
+  );
+  ipcMain.handle(IPC.setRoomBrightness, (_e, id: string, value: number) =>
+    registry.setRoomBrightness(id, value),
+  );
+  ipcMain.handle(IPC.setRoomEffect, (_e, id: string, name: string) =>
+    registry.setRoomEffect(id, name),
+  );
+
+  ipcMain.handle(IPC.exportEffects, (_e, serial: string) =>
+    registry.exportEffects(serial),
+  );
+  ipcMain.handle(IPC.importEffects, (_e, serial: string) =>
+    registry.importEffects(serial),
+  );
+  ipcMain.handle(IPC.copyEffects, (_e, from: string, to: string) =>
+    registry.copyEffects(from, to),
+  );
+  ipcMain.handle(IPC.listMotions, (_e, serial: string) => registry.listMotions(serial));
+
   ipcMain.handle(IPC.setPower, (_e, serial: string, on: boolean) =>
     registry.setPower(serial, on),
   );

@@ -1,10 +1,12 @@
-import { api } from '../state/store.js';
+import { api, useApp } from '../state/store.js';
 import type { DeviceView } from '../../shared/types.js';
+import { EffectLibrary } from './EffectLibrary.js';
 import { LayoutPreview } from './LayoutPreview.js';
 import { Slider } from './Slider.js';
 import { StatusChip } from './StatusChip.js';
 
 export function DeviceDetail({ device }: { device: DeviceView }) {
+  const rooms = useApp((s) => s.snapshot.rooms);
   // Controls stay usable while reconnecting — the write queue will deliver as
   // soon as the device is back, and greying everything out on a brief blip is
   // more annoying than useful. Only a dead token makes control impossible.
@@ -23,6 +25,22 @@ export function DeviceDetail({ device }: { device: DeviceView }) {
         </div>
         <div className="actions">
           <StatusChip status={device.status} />
+          {rooms.length > 0 && (
+            <select
+              className="room-picker"
+              value={device.roomId ?? ''}
+              onChange={(e) =>
+                void api().assignDevice(device.serialNo, e.target.value || null)
+              }
+            >
+              <option value="">No room</option>
+              {rooms.map((room) => (
+                <option key={room.id} value={room.id}>
+                  {room.name}
+                </option>
+              ))}
+            </select>
+          )}
           <button className="ghost" onClick={() => void api().identify(device.serialNo)}>
             Identify
           </button>
@@ -121,6 +139,8 @@ export function DeviceDetail({ device }: { device: DeviceView }) {
           )}
         </div>
       </div>
+
+      <EffectLibrary device={device} />
 
       {device.layout.panels.length > 0 && (
         <div className="card">

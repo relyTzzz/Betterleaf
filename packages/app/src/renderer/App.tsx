@@ -2,7 +2,14 @@ import { useState } from 'react';
 import { DeviceDetail } from './components/DeviceDetail.js';
 import { DeviceList } from './components/DeviceList.js';
 import { PairDialog } from './components/PairDialog.js';
-import { api, useApp, useSelectedDevice, useSnapshotSubscription } from './state/store.js';
+import { RoomDetail } from './components/RoomDetail.js';
+import {
+  api,
+  useApp,
+  useSelectedDevice,
+  useSelectedRoom,
+  useSnapshotSubscription,
+} from './state/store.js';
 import type { UnpairedDeviceView } from '../shared/types.js';
 
 export function App() {
@@ -10,6 +17,7 @@ export function App() {
 
   const snapshot = useApp((s) => s.snapshot);
   const device = useSelectedDevice();
+  const room = useSelectedRoom();
   const [pairing, setPairing] = useState<{ device?: UnpairedDeviceView } | undefined>();
 
   const { scanning, rung } = snapshot.discovery;
@@ -32,7 +40,9 @@ export function App() {
 
       <DeviceList onPair={(d) => setPairing({ device: d })} />
 
-      {device ? (
+      {room ? (
+        <RoomDetail room={room} />
+      ) : device ? (
         <DeviceDetail device={device} />
       ) : (
         <div className="empty">

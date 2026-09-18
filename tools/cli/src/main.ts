@@ -1,13 +1,19 @@
 #!/usr/bin/env node
+import { readFile, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import {
+  BUILTIN_MOTIONS,
   NanoleafDevice,
   illuminatedPanels,
+  isNanoleafEffect,
+  motionByUuid,
   pairDevice,
   probeDevice,
   runDiscoveryLadder,
   toRenderLayout,
   type DeviceInfo,
   type DeviceRecord,
+  type NanoleafEffect,
   type PanelColor,
 } from '@betterleaf/protocol';
 import {
@@ -176,12 +182,28 @@ async function cmdInfo(): Promise<void> {
   out(`  address    ${device.host}:${device.port}\n`);
   out(`  panels     ${lit.length} illuminated of ${device.layout.positionData.length} reported\n`);
   out(`  touch      ${device.capabilities.touch ? 'yes' : 'no'}\n`);
-  out(`  rhythm     ${device.capabilities.rhythm ? 'yes' : 'no'}\n`);
+  out(`  rhythm     ${describeRhythm(device)}\n`);
   out(`  stream     prefers ${device.capabilities.preferredStreamVersion}\n`);
   out(`  state      ${s.on ? 'on' : 'off'}  bri ${s.brightness}  hue ${s.hue}  sat ${s.sat}  ct ${s.ct}K  (${s.colorMode})\n`);
   out(`  effect     ${device.currentEffect}\n`);
 
   await device.close();
+}
+
+/**
+ * What the device says about its Rhythm module.
+ *
+ * `capabilities.rhythm` only means the model can take one. Whether a module is
+ * actually plugged in is a different question, and reporting the first as if it
+ * were the second is exactly the kind of confident-but-wrong answer this app
+ * exists to avoid.
+ */
+function describeRhythm(device: NanoleafDevice): string {
+  if (!device.capabilities.rhythm) return 'not supported';
+  const rhythm = device.rhythm;
+  if (!rhythm) return 'supported, device did not report one';
+  if (!rhythm.rhythmConnected) return 'supported, none attached';
+  return `connected (hw ${rhythm.hardwareVersion ?? '?'}, fw ${rhythm.firmwareVersion ?? '?'})`;
 }
 
 async function cmdState(): Promise<void> {
@@ -316,6 +338,86 @@ async function cmdSaveScene(): Promise<void> {
   await device.close();
 }
 
+async function cmdPlugins(): Promise<void> {
+  const device = await openDevice(positional[0]);
+  const uuids = await device.listPlugins();
+
+  if (uuids.length === 0) {
+    out(`${device.name} did not report its plugins (older firmware often does not).\n`);
+  } else {
+    out(
+      table(
+        ['MOTION', 'UUID'],
+        uuids.map((uuid) => [motionByUuid(uuid)?.label ?? '(unknown)', uuid]),
+      ),
+    );
+  }
+  await device.close();
+}
+
+async function cmdExportEffects(): Promise<void> {
+  const device = await openDevice(positional[0]);
+  // Absolute, because pnpm runs this from the package directory and a bare
+  // filename otherwise appears somewhere the user did not expect.
+  const file = resolve(positional[1] ?? `${device.model}-effects.json`);
+
+  const effects = await device.exportEffects();
+  await writeFile(file, JSON.stringify(effects, null, 2), 'utf8');
+
+  out(`Exported ${effects.length} effect(s) from ${device.name} to ${file}\n`);
+  for (const effect of effects) {
+    const motion = effect.pluginUuid ? motionByUuid(effect.pluginUuid)?.label : undefined;
+    out(`  ${effect.animName}  (${effect.animType}${motion ? `, ${motion}` : ''})\n`);
+  }
+  await device.close();
+}
+
+async function cmdImportEffect(): Promise<void> {
+  const file = positional[1];
+  if (!file) throw new Error('Usage: betterleaf import-effect <target> <file> [--name X]');
+
+  const parsed: unknown = JSON.parse(await readFile(file, 'utf8'));
+  const all: NanoleafEffect[] = Array.isArray(parsed)
+    ? parsed.filter(isNanoleafEffect)
+    : isNanoleafEffect(parsed)
+      ? [parsed]
+      : [];
+
+  if (all.length === 0) throw new Error(`${file} contains no Nanoleaf effects.`);
+
+  const wanted = flags['name'] ? String(flags['name']) : undefined;
+  const chosen = wanted ? all.filter((e) => e.animName === wanted) : all;
+  if (chosen.length === 0) {
+    throw new Error(`No effect named "${wanted}" in ${file}.`);
+  }
+
+  const device = await openDevice(positional[0]);
+  let written = 0;
+
+  for (const effect of chosen) {
+    try {
+      await device.importEffect(effect);
+      out(`  wrote ${effect.animName}\n`);
+      written++;
+    } catch (e) {
+      // Keep going: one incompatible effect should not abandon the rest.
+      err(`  skipped ${effect.animName}: ${(e as Error).message}\n`);
+    }
+  }
+
+  out(`Imported ${written} of ${chosen.length} effect(s) into ${device.name}.\n`);
+  await device.close();
+}
+
+async function cmdMotions(): Promise<void> {
+  out(
+    table(
+      ['ID', 'MOTION', 'TYPE', 'DESCRIPTION'],
+      BUILTIN_MOTIONS.map((m) => [m.id, m.label, m.pluginType, m.description]),
+    ),
+  );
+}
+
 async function cmdIdentify(): Promise<void> {
   const device = await openDevice(positional[0]);
   await device.identify();
@@ -343,6 +445,13 @@ const USAGE = `betterleaf - Nanoleaf control from the command line
   layout [target]            Panel positions, and what gets filtered out
   identify [target]          Flash the panels
 
+  plugins [target]           Motions this device actually has
+  motions                    The built-in motions effects can be authored from
+  export-effects [target] [file]
+                             Save every effect on the device to a JSON file
+  import-effect <target> <file> [--name X]
+                             Write effects from a file onto the device
+
   watch [target]             Live event stream (state, effects, touch)
   stream [target] [--seconds N] [--restore <effect>]
                              Stream a moving gradient over UDP
@@ -363,6 +472,10 @@ const COMMANDS: Record<string, () => Promise<void>> = {
   effect: cmdEffects,
   layout: cmdLayout,
   identify: cmdIdentify,
+  plugins: cmdPlugins,
+  motions: cmdMotions,
+  'export-effects': cmdExportEffects,
+  'import-effect': cmdImportEffect,
   watch: cmdWatch,
   stream: cmdStream,
   'save-scene': cmdSaveScene,

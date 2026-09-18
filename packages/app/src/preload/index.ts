@@ -13,6 +13,23 @@ const api: BetterleafApi = {
   getSnapshot: () => ipcRenderer.invoke(IPC.snapshot),
   rescan: () => ipcRenderer.invoke(IPC.rescan),
 
+  createRoom: (name) => ipcRenderer.invoke(IPC.createRoom, name),
+  renameRoom: (roomId, name) => ipcRenderer.invoke(IPC.renameRoom, roomId, name),
+  deleteRoom: (roomId) => ipcRenderer.invoke(IPC.deleteRoom, roomId),
+  reorderRooms: (roomIds) => ipcRenderer.invoke(IPC.reorderRooms, roomIds),
+  assignDevice: (serialNo, roomId) =>
+    ipcRenderer.invoke(IPC.assignDevice, serialNo, roomId),
+
+  setRoomPower: (roomId, on) => ipcRenderer.invoke(IPC.setRoomPower, roomId, on),
+  setRoomBrightness: (roomId, value) =>
+    ipcRenderer.invoke(IPC.setRoomBrightness, roomId, value),
+  setRoomEffect: (roomId, name) => ipcRenderer.invoke(IPC.setRoomEffect, roomId, name),
+
+  exportEffects: (serialNo) => ipcRenderer.invoke(IPC.exportEffects, serialNo),
+  importEffects: (serialNo) => ipcRenderer.invoke(IPC.importEffects, serialNo),
+  copyEffects: (from, to) => ipcRenderer.invoke(IPC.copyEffects, from, to),
+  listMotions: (serialNo) => ipcRenderer.invoke(IPC.listMotions, serialNo),
+
   setPower: (serialNo, on) => ipcRenderer.invoke(IPC.setPower, serialNo, on),
   setBrightness: (serialNo, value) => ipcRenderer.invoke(IPC.setBrightness, serialNo, value),
   setHueSat: (serialNo, hue, sat) => ipcRenderer.invoke(IPC.setHueSat, serialNo, hue, sat),
