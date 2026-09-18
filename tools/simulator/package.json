@@ -1,0 +1,19 @@
+{
+  "name": "@betterleaf/simulator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fake Nanoleaf NL22 / NL29 controllers: REST, SSE, mDNS and a UDP sink.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "tsx src/cli.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@betterleaf/protocol": "workspace:*",
+    "bonjour-service": "^1.3.0"
+  }
+}

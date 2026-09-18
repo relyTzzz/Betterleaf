@@ -1,0 +1,29 @@
+{
+  "name": "betterleaf",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A better controller for Nanoleaf lighting products",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "sim": "pnpm --filter @betterleaf/simulator start",
+    "cli": "pnpm --filter @betterleaf/cli start",
+    "dev": "pnpm --filter @betterleaf/app dev",
+    "app": "pnpm --filter @betterleaf/app build && pnpm --filter @betterleaf/app start",
+    "package": "pnpm --filter @betterleaf/app package",
+    "package:installer": "pnpm --filter @betterleaf/app package:installer"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

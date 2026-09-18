@@ -1,0 +1,13 @@
+packages:
+  - 'packages/*'
+  - 'tools/*'
+# Two packages fetch a prebuilt binary in their install script and are allowed
+# to: esbuild (which vitest needs) and Electron itself. Everything else is
+# declined explicitly — an unanswered entry here makes `pnpm install` exit
+# non-zero, which then blocks every other pnpm command in the workspace.
+allowBuilds:
+  electron: true
+  esbuild: true
+  # Squirrel installer tooling, pulled in transitively by electron-builder.
+  # We build NSIS installers, so its install script has nothing to do here.
+  electron-winstaller: false

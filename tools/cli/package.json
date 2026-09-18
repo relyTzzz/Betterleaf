@@ -1,0 +1,15 @@
+{
+  "name": "@betterleaf/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bare-metal CLI over @betterleaf/protocol, for verifying against real hardware.",
+  "type": "module",
+  "bin": { "betterleaf": "./src/main.ts" },
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@betterleaf/protocol": "workspace:*"
+  }
+}

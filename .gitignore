@@ -1,0 +1,20 @@
+node_modules/
+dist/
+out/
+release/
+# NB: no blanket `build/` rule. Nothing here builds into a directory by that
+# name (protocol -> dist/, app -> out/ and release/), and packages/app/build is
+# electron-builder's buildResources input — it holds the app icon and must be
+# committed or a fresh clone can't package the app.
+*.tsbuildinfo
+.vite/
+coverage/
+
+# Local device tokens / scratch state — never commit
+.betterleaf/
+*.local.json
+
+.DS_Store
+Thumbs.db
+.env
+.env.local
