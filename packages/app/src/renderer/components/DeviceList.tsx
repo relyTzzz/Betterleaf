@@ -103,6 +103,16 @@ export function DeviceList({ onPair }: { onPair: (device: UnpairedDeviceView) =>
           </button>
         ))}
 
+      {snapshot.devices.length > 0 && (
+        <button
+          className={`library-link${selection?.kind === 'library' ? ' selected' : ''}`}
+          onClick={() => select({ kind: 'library' })}
+        >
+          <span>Library</span>
+          <span className="room-count">{snapshot.libraryCount}</span>
+        </button>
+      )}
+
       {snapshot.unpaired.length > 0 && (
         <div className="section-label">Found, not paired</div>
       )}

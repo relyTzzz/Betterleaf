@@ -25,6 +25,18 @@ const api: BetterleafApi = {
     ipcRenderer.invoke(IPC.setRoomBrightness, roomId, value),
   setRoomEffect: (roomId, name) => ipcRenderer.invoke(IPC.setRoomEffect, roomId, name),
 
+  listLibrary: () => ipcRenderer.invoke(IPC.listLibrary),
+  refreshLibrary: () => ipcRenderer.invoke(IPC.refreshLibrary),
+  applyLibraryEffect: (name, serialNo) =>
+    ipcRenderer.invoke(IPC.applyLibraryEffect, name, serialNo),
+  pushLibraryEffect: (name, serialNo) =>
+    ipcRenderer.invoke(IPC.pushLibraryEffect, name, serialNo),
+  removeFromDevice: (name, serialNo) =>
+    ipcRenderer.invoke(IPC.removeFromDevice, name, serialNo),
+  forgetLibraryEffect: (name) => ipcRenderer.invoke(IPC.forgetLibraryEffect, name),
+  setFavourite: (name, favourite) =>
+    ipcRenderer.invoke(IPC.setFavourite, name, favourite),
+
   exportEffects: (serialNo) => ipcRenderer.invoke(IPC.exportEffects, serialNo),
   importEffects: (serialNo) => ipcRenderer.invoke(IPC.importEffects, serialNo),
   copyEffects: (from, to) => ipcRenderer.invoke(IPC.copyEffects, from, to),

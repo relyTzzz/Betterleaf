@@ -12,6 +12,8 @@ vi.mock('electron', () => ({
 }));
 
 const { DeviceRegistry } = await import('../src/main/registry.js');
+const { EffectHarvester } = await import('../src/main/effects/harvester.js');
+const { EffectLibrary } = await import('../src/main/effects/library.js');
 const { RoomStore } = await import('../src/main/room-store.js');
 const { DeviceStore } = await import('../src/main/store.js');
 const { startSimulator } = await import('../../../tools/simulator/src/index.js');
@@ -64,13 +66,22 @@ async function setup(profiles: ('NL22' | 'NL29')[] = ['NL29', 'NL22']) {
   );
 
   const roomStore = new RoomStore(path.join(dir, 'rooms.json'));
-  registry = new DeviceRegistry(deviceStore, roomStore, {
-    // Only the cached-address rung; nothing on the real network can leak in.
-    enableMdns: false,
-    enableSsdp: false,
-    enableSweep: false,
-    timings: { overallMs: 2_000 },
-  });
+  const library = new EffectLibrary(path.join(dir, 'library.json'));
+  registry = new DeviceRegistry(
+    deviceStore,
+    roomStore,
+    {
+      // Only the cached-address rung; nothing on the real network can leak in.
+      enableMdns: false,
+      enableSsdp: false,
+      enableSweep: false,
+      timings: { overallMs: 2_000 },
+    },
+    library,
+    // Poll fast, so the "notices a scene appearing" path is testable without a
+    // 30-second wait.
+    new EffectHarvester(library, { pollMs: 40 }),
+  );
 
   await registry.start();
   await waitFor(
@@ -164,6 +175,81 @@ describe('room membership', () => {
     expect(snapshot.rooms).toHaveLength(0);
     expect(snapshot.devices).toHaveLength(2);
     expect(snapshot.devices.every((d) => d.roomId === undefined)).toBe(true);
+  });
+});
+
+describe('effect library', () => {
+  it('harvests from every device on startup and reports the count', async () => {
+    const { registry } = await setup();
+
+    // Both simulated devices ship the same six factory effects, so the archive
+    // should collapse them rather than storing twelve.
+    await waitFor(
+      () => registry.snapshot().libraryCount === 6,
+      'library to be harvested',
+    );
+
+    const entries = await registry.listLibrary();
+    expect(entries).toHaveLength(6);
+    // Each was seen on both devices, and both currently hold it.
+    expect(entries[0]!.seenOn).toHaveLength(2);
+    expect(entries[0]!.onDevices).toHaveLength(2);
+  });
+
+  it('updates the count when a scene appears, without the library being open', async () => {
+    const { registry, sims } = await setup();
+    await waitFor(() => registry.snapshot().libraryCount === 6, 'initial harvest');
+
+    // As if the user downloaded a Discover scene in the Nanoleaf app: it lands
+    // on the device with no involvement from Betterleaf.
+    await fetch(`http://127.0.0.1:${sims[0]!.port}/api/v1/${sims[0]!.token}/effects`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        write: {
+          command: 'add',
+          version: '2.0',
+          animName: 'Tokyo Neon',
+          animType: 'plugin',
+          colorType: 'HSB',
+          pluginType: 'color',
+          pluginUuid: '027842e4-e1d6-4a4c-a731-be74a1ebd4cf',
+          palette: [{ hue: 320, saturation: 95, brightness: 100 }],
+        },
+      }),
+    });
+
+    // The sidebar count must follow on its own; waiting until someone opens the
+    // library view would leave a stale number on screen.
+    await waitFor(
+      () => registry.snapshot().libraryCount === 7,
+      'count to pick up the new scene',
+    );
+    expect((await registry.listLibrary()).map((e) => e.name)).toContain('Tokyo Neon');
+  });
+
+  it('refuses to remove an effect that is not archived byte for byte', async () => {
+    const { registry, sims } = await setup();
+    await waitFor(() => registry.snapshot().libraryCount === 6, 'initial harvest');
+
+    const result = await registry.removeFromDevice(
+      'Not On This Device',
+      sims[0]!.serialNo,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/does not have/);
+  });
+
+  it('frees a device slot once the archive is verified', async () => {
+    const { registry, sims } = await setup();
+    await waitFor(() => registry.snapshot().libraryCount === 6, 'initial harvest');
+
+    const result = await registry.removeFromDevice('Nemo', sims[0]!.serialNo);
+
+    expect(result.ok).toBe(true);
+    expect(sims[0]!.info.effects.effectsList).not.toContain('Nemo');
+    // Gone from the light, still in the archive — the whole point.
+    expect((await registry.listLibrary()).map((e) => e.name)).toContain('Nemo');
   });
 });
 

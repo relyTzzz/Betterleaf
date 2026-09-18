@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { DeviceDetail } from './components/DeviceDetail.js';
 import { DeviceList } from './components/DeviceList.js';
+import { LibraryView } from './components/LibraryView.js';
 import { PairDialog } from './components/PairDialog.js';
 import { RoomDetail } from './components/RoomDetail.js';
 import {
@@ -18,6 +19,7 @@ export function App() {
   const snapshot = useApp((s) => s.snapshot);
   const device = useSelectedDevice();
   const room = useSelectedRoom();
+  const showLibrary = useApp((s) => s.selection?.kind === 'library');
   const [pairing, setPairing] = useState<{ device?: UnpairedDeviceView } | undefined>();
 
   const { scanning, rung } = snapshot.discovery;
@@ -40,7 +42,9 @@ export function App() {
 
       <DeviceList onPair={(d) => setPairing({ device: d })} />
 
-      {room ? (
+      {showLibrary ? (
+        <LibraryView />
+      ) : room ? (
         <RoomDetail room={room} />
       ) : device ? (
         <DeviceDetail device={device} />

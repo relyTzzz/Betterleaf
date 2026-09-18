@@ -2,9 +2,15 @@
 
 A better controller for Nanoleaf lighting products. Local-only — no cloud, no account.
 
-Lights can be grouped into **rooms**, and effects can be **exported from one
-device and imported into another** — so a scene authored on the Canvas can be
-copied to the Light Panels without going near a marketplace.
+Lights can be grouped into **rooms**, and every scene on your lights is
+archived into a **local library**.
+
+That last part is the interesting one. Nanoleaf’s Discover marketplace
+delivers scenes *to the devices*, so the devices already hold everything you
+have ever downloaded. Betterleaf reads them off and keeps a copy — no cloud
+API, no account, nothing that can break. The archive outlives the
+controller’s limited storage, so you can clear a scene off a light to make
+room and put it back later with one click.
 
 The official app is slow and unreliable at the one thing it has to do: find the
 lights and change them. Betterleaf treats that as the product. Discovery races a

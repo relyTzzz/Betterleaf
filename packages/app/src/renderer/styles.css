@@ -561,3 +561,104 @@ input[type='range'].ct {
 .import-result li + li {
   margin-top: 4px;
 }
+
+/* --- library -------------------------------------------------------------- */
+
+.library-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  padding: 10px 12px;
+  margin-top: 10px;
+  font-weight: 550;
+}
+.library-link:hover {
+  background: var(--bg-raised);
+}
+.library-link.selected {
+  background: var(--bg-raised);
+  border-color: var(--accent-dim);
+}
+.library-link .room-count {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.library-filters {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.library-filters input[type='text'] {
+  flex: 1;
+}
+
+.library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.library-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  overflow: hidden;
+}
+
+/* The palette is the most recognisable thing about a scene — far more than its
+   name — so it leads the card. */
+.swatches {
+  display: flex;
+  height: 44px;
+}
+.swatches span {
+  flex: 1;
+}
+
+.library-card-body {
+  padding: 13px 14px 14px;
+}
+
+.library-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 550;
+  margin-bottom: 4px;
+}
+.library-name .star {
+  margin-left: auto;
+  background: none;
+  border: none;
+  padding: 0 2px;
+  font-size: 15px;
+  color: var(--text-faint);
+  line-height: 1;
+}
+.library-name .star.on {
+  color: var(--accent);
+}
+
+.library-meta {
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-bottom: 11px;
+}
+
+.library-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.library-actions button {
+  font-size: 12.5px;
+  padding: 5px 10px;
+}

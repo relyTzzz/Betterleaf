@@ -1,3 +1,15 @@
+> **Superseded.** Betterleaf no longer needs the Discover API.
+>
+> Scenes downloaded in the Nanoleaf app land on the lights, and the lights
+> serve their full effect documents over the local API. Betterleaf harvests
+> them into a local library instead, which needs no cloud endpoint, no
+> account, and cannot break when Nanoleaf changes something.
+>
+> The reconnaissance below is kept because it is hard-won and still true, and
+> because browsing Discover *without* a phone would still require it.
+
+---
+
 # Capturing the Nanoleaf Discover API
 
 Betterleaf can already put effects on your lights from files and from the

@@ -99,6 +99,27 @@ export interface RoomView {
   currentEffect?: string;
 }
 
+/**
+ * An archived effect, as the renderer sees it.
+ *
+ * `onDevices` is computed live from the devices themselves rather than stored:
+ * they are the authority on their own contents, and a cached answer goes stale
+ * the moment someone uses the Nanoleaf app.
+ */
+export interface LibraryEntryView {
+  name: string;
+  /** Which built-in motion drives it, when we can name one. */
+  motion?: string;
+  motionUuid?: string;
+  paletteColors: { hue: number; saturation: number; brightness: number }[];
+  favourite: boolean;
+  firstSeenAt: number;
+  /** Serials that currently hold this effect, byte-identical to the archive. */
+  onDevices: string[];
+  /** Serials it was ever harvested from. */
+  seenOn: string[];
+}
+
 /** Per-effect result of writing a batch to a device. */
 export interface ImportOutcome {
   imported: string[];
@@ -141,6 +162,8 @@ export interface DiscoveryState {
 
 export interface AppSnapshot {
   devices: DeviceView[];
+  /** Count only; the full list is fetched on demand so snapshots stay small. */
+  libraryCount: number;
   rooms: RoomView[];
   unpaired: UnpairedDeviceView[];
   discovery: DiscoveryState;
@@ -176,6 +199,15 @@ export interface BetterleafApi {
   setRoomBrightness(roomId: string, value: number): Promise<void>;
   setRoomEffect(roomId: string, name: string): Promise<void>;
 
+  listLibrary(): Promise<LibraryEntryView[]>;
+  refreshLibrary(): Promise<void>;
+  applyLibraryEffect(name: string, serialNo: string): Promise<ImportOutcome>;
+  pushLibraryEffect(name: string, serialNo: string): Promise<ImportOutcome>;
+  /** Free a slot on the device. Refuses unless the archive matches byte for byte. */
+  removeFromDevice(name: string, serialNo: string): Promise<{ ok: boolean; error?: string }>;
+  forgetLibraryEffect(name: string): Promise<void>;
+  setFavourite(name: string, favourite: boolean): Promise<void>;
+
   exportEffects(serialNo: string): Promise<ExportOutcome>;
   importEffects(serialNo: string): Promise<ImportOutcome>;
   copyEffects(fromSerialNo: string, toSerialNo: string): Promise<ImportOutcome>;
@@ -207,6 +239,13 @@ export const IPC = {
   setRoomPower: 'betterleaf:setRoomPower',
   setRoomBrightness: 'betterleaf:setRoomBrightness',
   setRoomEffect: 'betterleaf:setRoomEffect',
+  listLibrary: 'betterleaf:listLibrary',
+  refreshLibrary: 'betterleaf:refreshLibrary',
+  applyLibraryEffect: 'betterleaf:applyLibraryEffect',
+  pushLibraryEffect: 'betterleaf:pushLibraryEffect',
+  removeFromDevice: 'betterleaf:removeFromDevice',
+  forgetLibraryEffect: 'betterleaf:forgetLibraryEffect',
+  setFavourite: 'betterleaf:setFavourite',
   exportEffects: 'betterleaf:exportEffects',
   importEffects: 'betterleaf:importEffects',
   copyEffects: 'betterleaf:copyEffects',

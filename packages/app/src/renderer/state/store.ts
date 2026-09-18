@@ -19,7 +19,8 @@ export const api = (): BetterleafApi => window.betterleaf;
 /** The sidebar can select either a room or a single device. */
 export type Selection =
   | { kind: 'device'; id: string }
-  | { kind: 'room'; id: string };
+  | { kind: 'room'; id: string }
+  | { kind: 'library' };
 
 interface AppState {
   snapshot: AppSnapshot;
@@ -32,6 +33,7 @@ interface AppState {
 
 const EMPTY: AppSnapshot = {
   devices: [],
+  libraryCount: 0,
   rooms: [],
   unpaired: [],
   discovery: { scanning: false },
@@ -40,6 +42,7 @@ const EMPTY: AppSnapshot = {
 /** Does this selection still point at something that exists? */
 function stillValid(selection: Selection | undefined, snapshot: AppSnapshot): boolean {
   if (!selection) return false;
+  if (selection.kind === 'library') return true;
   return selection.kind === 'device'
     ? snapshot.devices.some((d) => d.serialNo === selection.id)
     : snapshot.rooms.some((r) => r.id === selection.id);
@@ -81,19 +84,19 @@ export function useSnapshotSubscription(): void {
 }
 
 export function useSelectedDevice(): DeviceView | undefined {
-  return useApp((s) =>
-    s.selection?.kind === 'device'
-      ? s.snapshot.devices.find((d) => d.serialNo === s.selection!.id)
-      : undefined,
-  );
+  return useApp((s) => {
+    const selection = s.selection;
+    if (selection?.kind !== 'device') return undefined;
+    return s.snapshot.devices.find((d) => d.serialNo === selection.id);
+  });
 }
 
 export function useSelectedRoom(): RoomView | undefined {
-  return useApp((s) =>
-    s.selection?.kind === 'room'
-      ? s.snapshot.rooms.find((r) => r.id === s.selection!.id)
-      : undefined,
-  );
+  return useApp((s) => {
+    const selection = s.selection;
+    if (selection?.kind !== 'room') return undefined;
+    return s.snapshot.rooms.find((r) => r.id === selection.id);
+  });
 }
 
 /** Devices in a room, in the room's own order. */

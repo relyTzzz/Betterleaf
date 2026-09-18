@@ -366,6 +366,17 @@ export class NanoleafSimulator extends EventEmitter<SimEvents> {
       return;
     }
 
+    // GET /effects returns the selected effect and the list of names. It is the
+    // cheap way to notice a scene arriving from the Nanoleaf app, and a real
+    // device serves it; omitting it here made that polling path silently 404.
+    if (rest[0] === 'effects' && method === 'GET') {
+      this.#send(res, 200, {
+        select: this.#info.effects.select,
+        effectsList: this.#info.effects.effectsList,
+      });
+      return;
+    }
+
     if (rest[0] === 'effects' && method === 'PUT') {
       this.#putEffects(res, body);
       return;

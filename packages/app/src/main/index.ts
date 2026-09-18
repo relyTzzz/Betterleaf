@@ -66,6 +66,24 @@ function registerIpc(): void {
     registry.setRoomEffect(id, name),
   );
 
+  ipcMain.handle(IPC.listLibrary, () => registry.listLibrary());
+  ipcMain.handle(IPC.refreshLibrary, () => registry.refreshLibrary());
+  ipcMain.handle(IPC.applyLibraryEffect, (_e, name: string, serial: string) =>
+    registry.applyLibraryEffect(name, serial),
+  );
+  ipcMain.handle(IPC.pushLibraryEffect, (_e, name: string, serial: string) =>
+    registry.pushLibraryEffect(name, serial),
+  );
+  ipcMain.handle(IPC.removeFromDevice, (_e, name: string, serial: string) =>
+    registry.removeFromDevice(name, serial),
+  );
+  ipcMain.handle(IPC.forgetLibraryEffect, (_e, name: string) =>
+    registry.forgetLibraryEffect(name),
+  );
+  ipcMain.handle(IPC.setFavourite, (_e, name: string, favourite: boolean) =>
+    registry.setFavourite(name, favourite),
+  );
+
   ipcMain.handle(IPC.exportEffects, (_e, serial: string) =>
     registry.exportEffects(serial),
   );

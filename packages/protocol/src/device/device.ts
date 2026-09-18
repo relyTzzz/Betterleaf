@@ -395,6 +395,24 @@ export class NanoleafDevice extends EventEmitter<DeviceEvents> {
   }
 
   /**
+   * Just the names of the effects on this device, and which is selected.
+   *
+   * Deliberately separate from `exportEffects`: checking whether anything has
+   * changed should not cost pulling every effect document down. There is no
+   * event for "an effect was added", so noticing a scene downloaded from the
+   * Nanoleaf app means asking, and this keeps that as cheap as possible.
+   */
+  async fetchEffectList(): Promise<{ select: string; effectsList: string[] }> {
+    const res = await this.#client.get<{ select: string; effectsList: string[] }>(
+      '/effects',
+    );
+    const effectsList = Array.isArray(res?.effectsList) ? res.effectsList : [];
+    this.#effects = effectsList;
+    if (typeof res?.select === 'string') this.#currentEffect = res.select;
+    return { select: res?.select ?? this.#currentEffect, effectsList };
+  }
+
+  /**
    * Every effect stored on this device, in the device's own format.
    *
    * The same shape `importEffect` accepts, so this is both a backup and the way

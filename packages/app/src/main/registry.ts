@@ -5,6 +5,7 @@ import {
   probeDevice,
   runDiscoveryLadder,
   BUILTIN_MOTIONS,
+  motionByUuid,
   panelShapeKind,
   toRenderLayout,
   type ConnectionStatus,
@@ -17,6 +18,7 @@ import type {
   DeviceView,
   DiscoveryState,
   PairProgress,
+  LibraryEntryView,
   MotionView,
   PairResult,
   Room,
@@ -30,6 +32,8 @@ import {
   type ExportOutcome,
   type ImportOutcome,
 } from './effects/file-source.js';
+import { EffectHarvester } from './effects/harvester.js';
+import { EffectLibrary, effectHash } from './effects/library.js';
 import { RoomStore } from './room-store.js';
 import { DeviceStore } from './store.js';
 
@@ -65,6 +69,8 @@ type RegistryEvents = {
 export class DeviceRegistry extends EventEmitter<RegistryEvents> {
   readonly #store: DeviceStore;
   readonly #rooms: RoomStore;
+  readonly #library: EffectLibrary;
+  readonly #harvester: EffectHarvester;
   readonly #devices = new Map<string, NanoleafDevice>();
 
   #unpaired: UnpairedDeviceView[] = [];
@@ -94,12 +100,27 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
       LadderOptions,
       'enableMdns' | 'enableSsdp' | 'enableSweep' | 'timings'
     > = {},
+    library = new EffectLibrary(),
+    harvester?: EffectHarvester,
   ) {
     super();
     this.#store = store;
     this.#rooms = rooms;
     this.#discoveryOptions = discoveryOptions;
+    this.#library = library;
+    this.#harvester = harvester ?? new EffectHarvester(library);
+
+    // A harvest means the archive grew. The count is part of every snapshot, so
+    // it has to be recomputed here — waiting until someone opens the library
+    // view leaves the sidebar showing a stale number.
+    this.#harvester.on('harvested', () => void this.#refreshLibraryCount());
+    this.#harvester.on('error', () => {
+      // Already visible as connection status; a failed harvest is not separately
+      // actionable and must not produce noise.
+    });
   }
+
+  #libraryCount = 0;
 
   /**
    * Bring up everything we knew about last time, then look for the rest.
@@ -110,6 +131,7 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
   async start(): Promise<void> {
     const known = await this.#store.load();
     this.#roomList = await this.#rooms.load();
+    this.#libraryCount = (await this.#library.entries()).length;
     await this.scan(known);
   }
 
@@ -190,6 +212,10 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     this.#devices.set(result.serialNo, device);
     device.connect();
 
+    // Everything the user has ever downloaded from Discover is sitting on the
+    // device. Read it off and keep a copy.
+    this.#harvester.watch(device);
+
     await this.#store.upsert(record);
     this.#publish();
   }
@@ -237,6 +263,7 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
   async forget(serialNo: string): Promise<void> {
     const device = this.#devices.get(serialNo);
     if (device) {
+      this.#harvester.unwatch(serialNo);
       await device.close();
       this.#devices.delete(serialNo);
     }
@@ -244,6 +271,135 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     // A forgotten device must not linger as a phantom member of a room.
     await this.#rooms.pruneDevice(serialNo);
     this.#roomList = await this.#rooms.load();
+    this.#publish();
+  }
+
+  // --- library ---------------------------------------------------------------
+
+  /**
+   * The archive, annotated with which devices currently hold each effect.
+   *
+   * Presence is computed here rather than stored: the devices are the authority
+   * on their own contents, and a cached answer goes stale as soon as someone
+   * uses the Nanoleaf app.
+   */
+  async listLibrary(): Promise<LibraryEntryView[]> {
+    const entries = await this.#library.entries();
+    this.#libraryCount = entries.length;
+
+    // Hash every device's effects once, rather than per entry.
+    const onDevices = new Map<string, string[]>();
+    for (const [serial, device] of this.#devices) {
+      for (const name of device.effects) {
+        onDevices.set(name, [...(onDevices.get(name) ?? []), serial]);
+      }
+    }
+
+    return entries.map((entry) => {
+      const view: LibraryEntryView = {
+        name: entry.name,
+        paletteColors: (entry.effect.palette ?? []).map((c) => ({
+          hue: c.hue,
+          saturation: c.saturation,
+          brightness: c.brightness,
+        })),
+        favourite: entry.favourite === true,
+        firstSeenAt: entry.firstSeenAt,
+        onDevices: onDevices.get(entry.name) ?? [],
+        seenOn: entry.seenOn,
+      };
+      if (entry.effect.pluginUuid) {
+        view.motionUuid = entry.effect.pluginUuid;
+        const motion = motionByUuid(entry.effect.pluginUuid);
+        if (motion) view.motion = motion.label;
+      }
+      return view;
+    });
+  }
+
+  async refreshLibrary(): Promise<void> {
+    await this.#harvester.harvestAll();
+    await this.#refreshLibraryCount();
+  }
+
+  /** Recompute the archive size and republish. */
+  async #refreshLibraryCount(): Promise<void> {
+    this.#libraryCount = (await this.#library.entries()).length;
+    this.#publish();
+  }
+
+  /** Write an archived effect to a device and switch to it. */
+  async applyLibraryEffect(name: string, serialNo: string): Promise<ImportOutcome> {
+    const outcome = await this.pushLibraryEffect(name, serialNo);
+    if (outcome.imported.length > 0) {
+      await this.#device(serialNo).selectEffect(name);
+    }
+    return outcome;
+  }
+
+  /** Write an archived effect to a device without switching to it. */
+  async pushLibraryEffect(name: string, serialNo: string): Promise<ImportOutcome> {
+    const entry = await this.#library.get(name);
+    if (!entry) {
+      return { imported: [], skipped: [{ name, reason: 'Not in the library.' }] };
+    }
+
+    try {
+      await this.#device(serialNo).importEffect(entry.effect);
+      this.#publish();
+      return { imported: [name], skipped: [] };
+    } catch (err) {
+      return { imported: [], skipped: [{ name, reason: (err as Error).message }] };
+    }
+  }
+
+  /**
+   * Delete an effect from a device to free a slot.
+   *
+   * Refuses unless the archive holds that exact effect, content and all. An
+   * archive that merely has *a* scene by the same name is not good enough: if
+   * the device's copy differs, deleting it destroys something we cannot restore.
+   */
+  async removeFromDevice(
+    name: string,
+    serialNo: string,
+  ): Promise<{ ok: boolean; error?: string }> {
+    const device = this.#device(serialNo);
+
+    let onDevice;
+    try {
+      onDevice = await device.exportEffect(name);
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+    if (!onDevice) return { ok: false, error: `${device.name} does not have "${name}".` };
+
+    const entry = await this.#library.get(name);
+    if (!entry) {
+      return { ok: false, error: `"${name}" is not archived yet, so it cannot be removed.` };
+    }
+    if (entry.contentHash !== effectHash(onDevice)) {
+      return {
+        ok: false,
+        error:
+          `The copy on ${device.name} differs from the archived one, so removing it ` +
+          'would lose that version. Refresh the library first.',
+      };
+    }
+
+    await device.deleteEffect(name);
+    this.#publish();
+    return { ok: true };
+  }
+
+  /** Forget an archived effect. Does not touch any device. */
+  async forgetLibraryEffect(name: string): Promise<void> {
+    await this.#library.remove(name);
+    await this.#refreshLibraryCount();
+  }
+
+  async setFavourite(name: string, favourite: boolean): Promise<void> {
+    await this.#library.setFavourite(name, favourite);
     this.#publish();
   }
 
@@ -429,6 +585,7 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
       devices: [...this.#devices.values()].map((device) =>
         toView(device, roomOf.get(device.serialNo)),
       ),
+      libraryCount: this.#libraryCount,
       rooms: this.#roomList.map((room) => this.#toRoomView(room)),
       unpaired: this.#unpaired,
       discovery: this.#discovery,
@@ -480,6 +637,7 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
 
   async dispose(): Promise<void> {
     this.#pairAbort?.abort();
+    this.#harvester.stop();
     await Promise.all([...this.#devices.values()].map((d) => d.close()));
     this.#devices.clear();
   }
