@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api, devicesIn, useApp } from '../state/store.js';
 import type { RoomView } from '../../shared/types.js';
+import { MusicNote } from './MusicNote.js';
 import { Slider } from './Slider.js';
 import { StatusChip } from './StatusChip.js';
 
@@ -11,6 +12,7 @@ export function RoomDetail({ room }: { room: RoomView }) {
   const [draftName, setDraftName] = useState(room.name);
 
   const members = devicesIn(snapshot, room);
+  const soundReactive = snapshot.soundReactiveEffects;
   const empty = members.length === 0;
 
   const commitRename = async () => {
@@ -110,6 +112,7 @@ export function RoomDetail({ room }: { room: RoomView }) {
                       onClick={() => void api().setRoomEffect(room.id, effect)}
                     >
                       {effect}
+                      {soundReactive.includes(effect) && <MusicNote />}
                     </button>
                   ))}
                 </div>

@@ -669,3 +669,11 @@ input[type='range'].ct {
   /* Nudged to sit on the text baseline rather than the line box. */
   margin-bottom: -1px;
 }
+
+/* Effect chips carrying an icon need to lay out as a row rather than inline
+   text, or the note sits on the baseline and drags the button's height. */
+.effects button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

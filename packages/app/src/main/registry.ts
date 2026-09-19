@@ -121,6 +121,7 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
   }
 
   #libraryCount = 0;
+  #soundReactiveNames: string[] = [];
 
   /**
    * Bring up everything we knew about last time, then look for the rest.
@@ -131,7 +132,7 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
   async start(): Promise<void> {
     const known = await this.#store.load();
     this.#roomList = await this.#rooms.load();
-    this.#libraryCount = (await this.#library.entries()).length;
+    await this.#refreshLibrarySummaryQuietly();
     await this.scan(known);
   }
 
@@ -323,9 +324,23 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     await this.#refreshLibraryCount();
   }
 
-  /** Recompute the archive size and republish. */
+  /**
+   * Derive the archive facts every snapshot carries, without publishing.
+   *
+   * Separate from the publishing version so startup can populate them before
+   * the first snapshot goes out, rather than emitting one that is briefly wrong.
+   */
+  async #refreshLibrarySummaryQuietly(): Promise<void> {
+    const entries = await this.#library.entries();
+    this.#libraryCount = entries.length;
+    this.#soundReactiveNames = entries
+      .filter((e) => e.effect.pluginType === 'rhythm')
+      .map((e) => e.name);
+  }
+
+  /** Recompute what every snapshot carries about the archive, and republish. */
   async #refreshLibraryCount(): Promise<void> {
-    this.#libraryCount = (await this.#library.entries()).length;
+    await this.#refreshLibrarySummaryQuietly();
     this.#publish();
   }
 
@@ -587,6 +602,7 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
         toView(device, roomOf.get(device.serialNo)),
       ),
       libraryCount: this.#libraryCount,
+      soundReactiveEffects: this.#soundReactiveNames,
       rooms: this.#roomList.map((room) => this.#toRoomView(room)),
       unpaired: this.#unpaired,
       discovery: this.#discovery,

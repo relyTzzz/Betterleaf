@@ -172,6 +172,15 @@ export interface AppSnapshot {
   devices: DeviceView[];
   /** Count only; the full list is fetched on demand so snapshots stay small. */
   libraryCount: number;
+  /**
+   * Names of archived effects that respond to music.
+   *
+   * Devices and rooms know their effects only by name, so this is what lets the
+   * effect chips there be marked. It comes from the library, which holds the
+   * full documents — an effect on a device but not yet harvested simply will not
+   * be marked, which is the honest failure: better unmarked than wrongly marked.
+   */
+  soundReactiveEffects: string[];
   rooms: RoomView[];
   unpaired: UnpairedDeviceView[];
   discovery: DiscoveryState;

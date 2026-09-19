@@ -34,6 +34,7 @@ interface AppState {
 const EMPTY: AppSnapshot = {
   devices: [],
   libraryCount: 0,
+  soundReactiveEffects: [],
   rooms: [],
   unpaired: [],
   discovery: { scanning: false },

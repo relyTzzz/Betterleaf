@@ -2,11 +2,13 @@ import { api, useApp } from '../state/store.js';
 import type { DeviceView } from '../../shared/types.js';
 import { EffectLibrary } from './EffectLibrary.js';
 import { LayoutPreview } from './LayoutPreview.js';
+import { MusicNote } from './MusicNote.js';
 import { Slider } from './Slider.js';
 import { StatusChip } from './StatusChip.js';
 
 export function DeviceDetail({ device }: { device: DeviceView }) {
   const rooms = useApp((s) => s.snapshot.rooms);
+  const soundReactive = useApp((s) => s.snapshot.soundReactiveEffects);
   // Controls stay usable while reconnecting — the write queue will deliver as
   // soon as the device is back, and greying everything out on a brief blip is
   // more annoying than useful. Only a dead token makes control impossible.
@@ -132,6 +134,7 @@ export function DeviceDetail({ device }: { device: DeviceView }) {
               onClick={() => void api().selectEffect(device.serialNo, effect)}
             >
               {effect}
+              {soundReactive.includes(effect) && <MusicNote />}
             </button>
           ))}
           {device.effects.length === 0 && (

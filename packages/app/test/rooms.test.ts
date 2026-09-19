@@ -256,6 +256,11 @@ describe('effect library', () => {
     const beat = entries.find((e) => e.name === 'Beat Drop');
     expect(beat?.soundReactive).toBe(true);
 
+    // Devices and rooms know their effects only by name, so the snapshot has to
+    // carry which ones are sound-reactive for their chips to be marked too.
+    expect(registry.snapshot().soundReactiveEffects).toContain('Beat Drop');
+    expect(registry.snapshot().soundReactiveEffects).not.toContain('Forest');
+
     // Everything else runs on its own and must not be marked.
     for (const other of entries.filter((e) => e.name !== 'Beat Drop')) {
       expect(other.soundReactive).toBe(false);
