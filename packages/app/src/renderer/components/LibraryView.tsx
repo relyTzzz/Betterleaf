@@ -131,6 +131,38 @@ export function LibraryView() {
   );
 }
 
+/**
+ * Marks a sound-reactive scene.
+ *
+ * Drawn rather than using a Unicode note: the glyph renders as a colour emoji in
+ * some font stacks, which sits badly next to a scene name and cannot be tinted
+ * to match the rest of the UI.
+ */
+function MusicNote() {
+  return (
+    <svg
+      className="music-note"
+      viewBox="0 0 16 16"
+      width="13"
+      height="13"
+      role="img"
+      aria-label="Sound reactive"
+    >
+      <title>Sound reactive — responds to music</title>
+      <path
+        d="M6 12.5V4.2l7-1.7v8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <ellipse cx="4.2" cy="12.4" rx="2.2" ry="1.8" fill="currentColor" />
+      <ellipse cx="11.2" cy="10.6" rx="2.2" ry="1.8" fill="currentColor" />
+    </svg>
+  );
+}
+
 function LibraryCard({
   entry,
   devices,
@@ -161,6 +193,7 @@ function LibraryCard({
       <div className="library-card-body">
         <div className="library-name">
           {entry.name}
+          {entry.soundReactive && <MusicNote />}
           <button
             className={`star${entry.favourite ? ' on' : ''}`}
             title={entry.favourite ? 'Remove from favourites' : 'Add to favourites'}

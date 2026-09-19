@@ -12,8 +12,19 @@ export interface DeviceCapabilities {
   family: DeviceFamily;
   /** Touch/gesture events over SSE (event id 4). Canvas only, today. */
   touch: boolean;
-  /** Has (or can have) a Rhythm module. Light Panels only. */
-  rhythm: boolean;
+  /**
+   * Can play sound-reactive effects.
+   *
+   * Not the same as taking a Rhythm module: Canvas and Shapes detect sound with
+   * a built-in microphone, while Light Panels need the external module. Both
+   * ends up able to run rhythm motions, which is what this means.
+   *
+   * A hint only. `requestPlugins` is the authority for any given unit, and is
+   * what the compatibility check actually consults.
+   */
+  soundReactive: boolean;
+  /** Takes an external Rhythm module, rather than detecting sound itself. */
+  rhythmModule: boolean;
   /**
    * Which external-control version to *try first*. Never trusted as final:
    * {@link import('../stream/extcontrol.js').StreamController} falls back and
@@ -56,7 +67,12 @@ export function deriveCapabilities(info: DeviceInfo): DeviceCapabilities {
     model,
     family,
     touch: family === 'canvas',
-    rhythm: family === 'light-panels',
+    // Verified against hardware: a real NL29 reports the same rhythm motions as
+    // a real NL22, because it listens with a built-in microphone rather than an
+    // add-on module. Treating sound reactivity as a Light Panels exclusive was
+    // simply wrong.
+    soundReactive: family !== 'unknown',
+    rhythmModule: family === 'light-panels',
     preferredStreamVersion,
     defaultStreamPort:
       preferredStreamVersion === 'v1' ? STREAM_PORT_V1 : STREAM_PORT_V2,

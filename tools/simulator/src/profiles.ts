@@ -32,13 +32,37 @@ const COLOR_PLUGINS = [
 ];
 
 /**
- * Sound-reactive motions, which need a Rhythm module. Only the Light Panels
- * have one, so this is what makes a rhythm effect genuinely un-importable onto
- * the Canvas rather than hypothetically so.
+ * The undocumented extras both real devices report.
+ *
+ * Taken verbatim from hardware: an NL22 and an NL29 each list fourteen plugins,
+ * thirteen of them shared. Nanoleaf publishes names for only six, so the rest
+ * are known by uuid alone — which is exactly the situation the client has to
+ * cope with, so the simulator reproduces it rather than inventing tidy names.
  */
-const RHYTHM_PLUGINS = [
-  { uuid: 'bc6fe7e0-36d4-4f95-aa21-52a386daa9dc', name: 'Pulse Pop Beats', type: 'rhythm' as const },
-  { uuid: 'ba632d3e-9c2b-4413-a965-510c839b3f72', name: 'Sound Bar', type: 'rhythm' as const },
+const SHARED_EXTRA_PLUGINS = [
+  '23e70ff4-458c-4852-826f-9315d89ee6ed',
+  '29e48ce5-fcf1-4943-b73f-fad1c09701f3',
+  '30018343-7587-4152-8d97-1c349ccc3e68',
+  '337784c0-6c98-447a-8a9f-fc6ac44a8024',
+  '5cec763a-6f32-45cf-a691-b81e176b6b4a',
+  '60333927-cc36-4a5a-a682-9bd114de8bff',
+  'fe0d0ba8-741f-4210-940c-454eceed010f',
+].map((uuid) => ({ uuid, name: '', type: 'color' as const }));
+
+/**
+ * The one plugin each device has that the other does not.
+ *
+ * Both models play sound-reactive scenes — the Canvas with a built-in
+ * microphone, the Light Panels with the external Rhythm module — so this is not
+ * a sound-versus-no-sound split. It is simply two motions that happen not to be
+ * installed on both, and it is what makes cross-device compatibility a real
+ * case rather than a hypothetical one.
+ */
+const NL22_ONLY = [
+  { uuid: 'bc6fe7e0-36d4-4f95-aa21-52a386daa9dc', name: '', type: 'rhythm' as const },
+];
+const NL29_ONLY = [
+  { uuid: '0349fc36-7727-4ebc-bc1b-a0021c55038e', name: '', type: 'rhythm' as const },
 ];
 
 /**
@@ -180,7 +204,7 @@ export const PROFILES: Record<ProfileName, Profile> = {
     name: 'NL22',
     mdnsType: 'nanoleafms',
     supportsTouch: false,
-    plugins: [...COLOR_PLUGINS, ...RHYTHM_PLUGINS],
+    plugins: [...COLOR_PLUGINS, ...SHARED_EXTRA_PLUGINS, ...NL22_ONLY],
     // Recent Aurora firmware accepts v2 as well, which is exactly why the
     // stream controller probes instead of trusting the model number.
     streamVersions: ['v1'],
@@ -209,8 +233,8 @@ export const PROFILES: Record<ProfileName, Profile> = {
     name: 'NL29',
     mdnsType: 'nanoleafapi',
     supportsTouch: true,
-    // No Rhythm module, so no sound-reactive motions.
-    plugins: [...COLOR_PLUGINS],
+    // Sound-reactive too, via a built-in microphone rather than a module.
+    plugins: [...COLOR_PLUGINS, ...SHARED_EXTRA_PLUGINS, ...NL29_ONLY],
     streamVersions: ['v2'],
     info: () =>
       baseInfo('Canvas EEE0', 'NL29', 'S20233CD5678', '1.3.1', canvasPanels(), 100),

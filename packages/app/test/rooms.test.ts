@@ -228,6 +228,40 @@ describe('effect library', () => {
     expect((await registry.listLibrary()).map((e) => e.name)).toContain('Tokyo Neon');
   });
 
+  it('flags sound-reactive scenes so the UI can mark them', async () => {
+    // The Light Panels profile has a Rhythm module, so it accepts rhythm motions.
+    const { registry, sims } = await setup(['NL22', 'NL29']);
+    await waitFor(() => registry.snapshot().libraryCount === 6, 'initial harvest');
+
+    await fetch(`http://127.0.0.1:${sims[0]!.port}/api/v1/${sims[0]!.token}/effects`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        write: {
+          command: 'add',
+          version: '2.0',
+          animName: 'Beat Drop',
+          animType: 'plugin',
+          colorType: 'HSB',
+          pluginType: 'rhythm',
+          pluginUuid: 'bc6fe7e0-36d4-4f95-aa21-52a386daa9dc',
+          palette: [{ hue: 200, saturation: 100, brightness: 100 }],
+        },
+      }),
+    });
+
+    await waitFor(() => registry.snapshot().libraryCount === 7, 'the rhythm scene');
+
+    const entries = await registry.listLibrary();
+    const beat = entries.find((e) => e.name === 'Beat Drop');
+    expect(beat?.soundReactive).toBe(true);
+
+    // Everything else runs on its own and must not be marked.
+    for (const other of entries.filter((e) => e.name !== 'Beat Drop')) {
+      expect(other.soundReactive).toBe(false);
+    }
+  });
+
   it('refuses to remove an effect that is not archived byte for byte', async () => {
     const { registry, sims } = await setup();
     await waitFor(() => registry.snapshot().libraryCount === 6, 'initial harvest');

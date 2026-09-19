@@ -43,7 +43,10 @@ export interface DeviceView {
   currentEffect: string;
   capabilities: {
     touch: boolean;
-    rhythm: boolean;
+    /** Can play sound-reactive scenes, however it listens. */
+    soundReactive: boolean;
+    /** Uses an external Rhythm module rather than a built-in microphone. */
+    rhythmModule: boolean;
   };
   streamVersion?: StreamVersion;
   layout: {
@@ -111,6 +114,11 @@ export interface LibraryEntryView {
   /** Which built-in motion drives it, when we can name one. */
   motion?: string;
   motionUuid?: string;
+  /**
+   * Driven by a sound-reactive motion, so it responds to music rather than
+   * running on its own. Needs a Rhythm module on the device to do anything.
+   */
+  soundReactive: boolean;
   paletteColors: { hue: number; saturation: number; brightness: number }[];
   favourite: boolean;
   firstSeenAt: number;

@@ -662,3 +662,10 @@ input[type='range'].ct {
   font-size: 12.5px;
   padding: 5px 10px;
 }
+
+.music-note {
+  color: var(--accent);
+  flex: none;
+  /* Nudged to sit on the text baseline rather than the line box. */
+  margin-bottom: -1px;
+}

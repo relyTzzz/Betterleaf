@@ -191,19 +191,21 @@ async function cmdInfo(): Promise<void> {
 }
 
 /**
- * What the device says about its Rhythm module.
+ * How this device hears sound, if it can.
  *
- * `capabilities.rhythm` only means the model can take one. Whether a module is
- * actually plugged in is a different question, and reporting the first as if it
- * were the second is exactly the kind of confident-but-wrong answer this app
- * exists to avoid.
+ * Two separate questions that are easy to conflate: whether the device can play
+ * sound-reactive scenes at all, and whether it does so with an add-on module or
+ * a built-in microphone. Canvas and Shapes listen by themselves; Light Panels
+ * need the Rhythm module plugged in.
  */
 function describeRhythm(device: NanoleafDevice): string {
-  if (!device.capabilities.rhythm) return 'not supported';
+  if (!device.capabilities.soundReactive) return 'not supported';
+  if (!device.capabilities.rhythmModule) return 'built in';
+
   const rhythm = device.rhythm;
-  if (!rhythm) return 'supported, device did not report one';
-  if (!rhythm.rhythmConnected) return 'supported, none attached';
-  return `connected (hw ${rhythm.hardwareVersion ?? '?'}, fw ${rhythm.firmwareVersion ?? '?'})`;
+  if (!rhythm) return 'needs the Rhythm module; device did not report one';
+  if (!rhythm.rhythmConnected) return 'needs the Rhythm module; none attached';
+  return `Rhythm module attached (hw ${rhythm.hardwareVersion ?? '?'}, fw ${rhythm.firmwareVersion ?? '?'})`;
 }
 
 async function cmdState(): Promise<void> {

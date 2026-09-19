@@ -16,7 +16,8 @@ afterEach(async () => {
 });
 
 const FLOW = '027842e4-e1d6-4a4c-a731-be74a1ebd4cf';
-const RHYTHM_MOTION = 'bc6fe7e0-36d4-4f95-aa21-52a386daa9dc';
+/** A motion a real NL22 carries and a real NL29 does not. */
+const NL22_ONLY_MOTION = 'bc6fe7e0-36d4-4f95-aa21-52a386daa9dc';
 
 function flowEffect(name = 'Test Flow'): NanoleafEffect {
   return {
@@ -236,20 +237,27 @@ describe('export and import against a device', () => {
     const canvasPlugins = await canvas.device.listPlugins();
     const panelPlugins = await panels.device.listPlugins();
 
+    // Both carry the documented motions...
     expect(canvasPlugins).toContain(FLOW);
-    // Only the Light Panels have a Rhythm module.
-    expect(canvasPlugins).not.toContain(RHYTHM_MOTION);
-    expect(panelPlugins).toContain(RHYTHM_MOTION);
+    expect(panelPlugins).toContain(FLOW);
+    // ...and both are sound-reactive. What differs is one motion each, which
+    // is why compatibility is decided per-motion rather than per-model.
+    expect(panelPlugins).toContain(NL22_ONLY_MOTION);
+    expect(canvasPlugins).not.toContain(NL22_ONLY_MOTION);
   });
 
-  it('refuses a rhythm effect on a device with no Rhythm module', async () => {
+  it('refuses an effect whose motion this device does not have', async () => {
     const { device, sim, cleanup } = await simDevice('NL29');
     cleanups.push(cleanup);
 
+    // Both models play sound-reactive scenes — the Canvas with a built-in
+    // microphone, the Light Panels with the Rhythm module — so this is not a
+    // sound-versus-no-sound split. These two simply have one motion each that
+    // the other does not carry, which is what makes the check worth having.
     const rhythm: NanoleafEffect = {
       ...flowEffect('Beat Drop'),
       pluginType: 'rhythm',
-      pluginUuid: RHYTHM_MOTION,
+      pluginUuid: NL22_ONLY_MOTION,
     };
 
     const before = sim.requests.filter((r) => r.path.endsWith('/effects')).length;

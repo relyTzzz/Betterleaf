@@ -298,6 +298,7 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     return entries.map((entry) => {
       const view: LibraryEntryView = {
         name: entry.name,
+        soundReactive: entry.effect.pluginType === 'rhythm',
         paletteColors: (entry.effect.palette ?? []).map((c) => ({
           hue: c.hue,
           saturation: c.saturation,
@@ -658,7 +659,8 @@ function toView(device: NanoleafDevice, roomId?: string): DeviceView {
     currentEffect: device.currentEffect,
     capabilities: {
       touch: device.capabilities.touch,
-      rhythm: device.capabilities.rhythm,
+      soundReactive: device.capabilities.soundReactive,
+      rhythmModule: device.capabilities.rhythmModule,
     },
     layout: {
       panels: render.panels.map((panel) => ({

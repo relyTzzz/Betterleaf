@@ -21,7 +21,11 @@ describe('device identity and capabilities', () => {
     expect(canvas.device.capabilities).toMatchObject({
       family: 'canvas',
       touch: true,
-      rhythm: false,
+      // Listens with a built-in microphone, so it plays sound-reactive scenes
+      // without an add-on module. Verified against real hardware, which reports
+      // the same rhythm motions as the Light Panels.
+      soundReactive: true,
+      rhythmModule: false,
       preferredStreamVersion: 'v2',
     });
     await cleanup!();
@@ -31,7 +35,9 @@ describe('device identity and capabilities', () => {
     expect(panels.device.capabilities).toMatchObject({
       family: 'light-panels',
       touch: false,
-      rhythm: true,
+      // Also sound-reactive, but only with the external Rhythm module attached.
+      soundReactive: true,
+      rhythmModule: true,
       preferredStreamVersion: 'v1',
     });
   });
