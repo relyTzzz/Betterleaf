@@ -1,11 +1,21 @@
 import { join } from 'node:path';
-import { BrowserWindow, app, ipcMain, shell } from 'electron';
+import { BrowserWindow, Menu, app, ipcMain, shell } from 'electron';
 import { IPC } from '../shared/types.js';
 import { DeviceRegistry } from './registry.js';
 
 // Before anything reads app.getPath('userData'): the package name is scoped
 // (@betterleaf/app), which would otherwise become the directory name on disk.
 app.setName('Betterleaf');
+
+// No application menu. Betterleaf has nothing to put in one — every action lives
+// in the window itself — and the stock File/Edit/View/Window/Help bar is just
+// Electron showing through.
+//
+// Safe on Windows and Linux: Chromium handles editing shortcuts (Ctrl+A/C/V/X/Z)
+// inside editable fields in the renderer itself, so they do not depend on menu
+// accelerators. macOS is the platform where those roles are load-bearing, and
+// would need an Edit menu restoring if this ever ships there.
+Menu.setApplicationMenu(null);
 
 const registry = new DeviceRegistry();
 let window: BrowserWindow | undefined;
@@ -30,6 +40,17 @@ function createWindow(): void {
   });
 
   window.on('ready-to-show', () => window?.show());
+
+  // Removing the menu also removes its accelerators, so put the one that
+  // actually matters back — but only in development, where it is wanted.
+  if (!app.isPackaged) {
+    window.webContents.on('before-input-event', (_event, input) => {
+      const devtools =
+        input.key === 'F12' ||
+        (input.control && input.shift && input.key.toLowerCase() === 'i');
+      if (devtools) window?.webContents.toggleDevTools();
+    });
+  }
 
   // Links open in the user's browser, never inside the app shell.
   window.webContents.setWindowOpenHandler(({ url }) => {
