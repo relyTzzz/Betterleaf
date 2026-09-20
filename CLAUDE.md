@@ -38,7 +38,7 @@ Concretely, four things carry that weight. Don't undo them without a reason:
 
 ## Testing
 
-`pnpm test` runs 178 tests against `tools/simulator` — no hardware required.
+`pnpm test` runs 202 tests against `tools/simulator` — no hardware required.
 
 - The simulator emulates the awkward parts on purpose: 401 before pairing, an
   empty extControl body on Canvas, a Rhythm pseudo-panel in the NL22 layout,
@@ -90,6 +90,28 @@ Consequences that the code depends on:
 - A firing that fails **still claims its slot**, and records why. Retrying every
   20 seconds against a light that is not there is the storm avoided everywhere
   else in this codebase.
+
+### Locks
+
+A locked light is **skipped by schedules entirely** — no scene, no brightness,
+no power. One rule is easier to predict than a list of exceptions, and a lock
+that still let a schedule dim the scene to 10% would not feel like a lock.
+
+- **Locks are per device**, because that is where a schedule actually applies.
+  A room toggle sets all its members; there is no separate room lock to drift.
+- **`RoomView.locked` means *every* member**, not any. A room reading "locked"
+  while a schedule could still change one of its lights would be lying.
+- **Only schedules are blocked.** Manual control still works — the lock exists
+  to stop the app changing the scene behind your back, not to stop you.
+- **A held slot is still claimed**, and recorded as `locked`. Otherwise
+  unlocking at 9am would immediately fire the 7am slot that was deliberately
+  skipped. `skipped` is a third outcome in `ApplyOutcome`, deliberately neither
+  success nor failure: marking it failed puts a warning on something working as
+  asked, and marking it `ok` claims the lights changed when they did not.
+- **Locks persist** (`locks.json`). The thing a lock defends against happens
+  hours later, often after a restart.
+- A room schedule **applies to the unlocked members** and reports `ok`; only an
+  entirely locked room reports `locked`.
 
 The timing rules live in `main/scheduler.ts`, which deliberately knows nothing
 about devices, rooms or Electron — it decides *when* and hands the *what* to an

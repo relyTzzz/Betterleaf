@@ -218,6 +218,13 @@ function registerIpc(): void {
   );
   ipcMain.handle(IPC.runScheduleNow, (_e, id: string) => registry.runScheduleNow(id));
 
+  ipcMain.handle(IPC.setDeviceLocked, (_e, serial: string, locked: boolean) =>
+    registry.setDeviceLocked(serial, locked),
+  );
+  ipcMain.handle(IPC.setRoomLocked, (_e, roomId: string, locked: boolean) =>
+    registry.setRoomLocked(roomId, locked),
+  );
+
   ipcMain.handle(IPC.setTrayEnabled, async (_e, enabled: boolean) => {
     await settingsStore.save({ trayEnabled: enabled });
     applySettings({ ...settings, trayEnabled: enabled });

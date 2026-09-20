@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api, devicesIn, useApp } from '../state/store.js';
 import type { RoomView } from '../../shared/types.js';
+import { LockNote, LockToggle } from './LockToggle.js';
 import { MusicNote } from './MusicNote.js';
 import { Slider } from './Slider.js';
 import { StatusChip } from './StatusChip.js';
@@ -101,7 +102,14 @@ export function RoomDetail({ room }: { room: RoomView }) {
           </div>
 
           <div className="card">
-            <h3>Shared effects</h3>
+            <h3 className="card-head">
+              <span>Shared effects</span>
+              <LockToggle
+                locked={room.locked}
+                what={room.currentEffect || 'these lights'}
+                onToggle={() => void api().setRoomLocked(room.id, !room.locked)}
+              />
+            </h3>
             {room.effects.length > 0 ? (
               <>
                 <div className="effects">
@@ -129,6 +137,7 @@ export function RoomDetail({ room }: { room: RoomView }) {
                 the whole room. Apply effects to each light individually.
               </p>
             )}
+            {room.locked && <LockNote subject="these lights" />}
           </div>
 
           <div className="card">

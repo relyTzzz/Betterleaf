@@ -94,7 +94,11 @@ export function SchedulesView() {
     const result = await api().runScheduleNow(schedule.id);
     setRanJustNow((prev) => ({
       ...prev,
-      [schedule.id]: result.ok ? 'Applied' : (result.error ?? 'Failed'),
+      [schedule.id]: result.ok
+        ? 'Applied'
+        : result.error === 'locked'
+          ? 'Held — the scene is locked'
+          : (result.error ?? 'Failed'),
     }));
   };
 
@@ -240,15 +244,20 @@ function ScheduleRow({
         </div>
         <div className="schedule-meta faint">
           {describeNextRun(schedule, now)}
-          {schedule.lastResult && schedule.lastResult !== 'ok' && (
-            <>
-              {' · '}
-              <span className="warn">
-                {schedule.lastResult === 'missed'
-                  ? 'missed — Betterleaf was not running'
-                  : `last run failed: ${schedule.lastResult}`}
-              </span>
-            </>
+          {schedule.lastResult === 'locked' ? (
+            <> · held — the scene was locked</>
+          ) : (
+            schedule.lastResult &&
+            schedule.lastResult !== 'ok' && (
+              <>
+                {' · '}
+                <span className="warn">
+                  {schedule.lastResult === 'missed'
+                    ? 'missed — Betterleaf was not running'
+                    : `last run failed: ${schedule.lastResult}`}
+                </span>
+              </>
+            )
           )}
           {note && <> · {note}</>}
         </div>

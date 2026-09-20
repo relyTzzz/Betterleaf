@@ -2,11 +2,29 @@ import { EventEmitter } from 'node:events';
 import type { Schedule, ScheduleAction, ScheduleTarget } from '../shared/types.js';
 import type { ScheduleStore } from './schedule-store.js';
 
+/**
+ * The result of trying to carry a schedule out.
+ *
+ * `skipped` is deliberately neither success nor an error. A locked light was
+ * held back on purpose, so recording it as a failure would put a warning on
+ * something working exactly as asked — and recording it as `ok` would claim the
+ * lights changed when they did not.
+ */
+export type ApplyOutcome = { kind: 'ok' } | { kind: 'skipped'; reason: string };
+
+/**
+ * Recorded as `lastResult` when a lock held the schedule back.
+ *
+ * A sentinel rather than a sentence, because the UI has more room and better
+ * words than a stored string does.
+ */
+export const LOCKED_RESULT = 'locked';
+
 /** What actually drives the lights when a schedule fires. */
 export type ApplySchedule = (
   target: ScheduleTarget,
   action: ScheduleAction,
-) => Promise<void>;
+) => Promise<ApplyOutcome>;
 
 export interface SchedulerOptions {
   /**
@@ -210,11 +228,11 @@ export class Scheduler extends EventEmitter<SchedulerEvents> {
     return result === 'ok' ? { ok: true } : { ok: false, error: result };
   }
 
-  /** Returns 'ok', or the error text to record against the schedule. */
+  /** Returns 'ok', a skip reason, or the error text to record. */
   async #fire(schedule: Schedule): Promise<string> {
     try {
-      await this.#apply(schedule.target, schedule.action);
-      return 'ok';
+      const outcome = await this.#apply(schedule.target, schedule.action);
+      return outcome.kind === 'ok' ? 'ok' : outcome.reason;
     } catch (err) {
       return (err as Error).message || 'Failed';
     }

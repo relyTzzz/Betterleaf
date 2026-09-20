@@ -58,6 +58,13 @@ export interface DeviceView {
   lastSeenAt?: number;
   /** Room this device belongs to, if any. A device is in at most one room. */
   roomId?: string;
+  /**
+   * Held by the user, so schedules leave it alone entirely.
+   *
+   * Only schedules are blocked. Anything done by hand still works — the point
+   * is to stop the app changing the scene behind your back, not to stop you.
+   */
+  locked: boolean;
 }
 
 /**
@@ -100,6 +107,14 @@ export interface RoomView {
    * member's effect would claim the whole room is showing it.
    */
   currentEffect?: string;
+  /**
+   * True when every connected member is locked.
+   *
+   * Deliberately "every", not "any": a room that reads locked while a schedule
+   * could still change one of its lights would be lying. Partially locked rooms
+   * report false, and the members show their own badges.
+   */
+  locked: boolean;
 }
 
 /**
@@ -305,6 +320,11 @@ export interface BetterleafApi {
   /** Apply a schedule's action now, without waiting for its time or changing it. */
   runScheduleNow(id: string): Promise<{ ok: boolean; error?: string }>;
 
+  /** Hold a light's scene, so schedules skip it until it is unlocked. */
+  setDeviceLocked(serialNo: string, locked: boolean): Promise<void>;
+  /** Lock or unlock every connected member of a room at once. */
+  setRoomLocked(roomId: string, locked: boolean): Promise<void>;
+
   setTrayEnabled(enabled: boolean): Promise<void>;
   setStartWithWindows(enabled: boolean): Promise<void>;
 
@@ -353,6 +373,8 @@ export const IPC = {
   deleteSchedule: 'betterleaf:deleteSchedule',
   setScheduleEnabled: 'betterleaf:setScheduleEnabled',
   runScheduleNow: 'betterleaf:runScheduleNow',
+  setDeviceLocked: 'betterleaf:setDeviceLocked',
+  setRoomLocked: 'betterleaf:setRoomLocked',
   setTrayEnabled: 'betterleaf:setTrayEnabled',
   setStartWithWindows: 'betterleaf:setStartWithWindows',
   listLibrary: 'betterleaf:listLibrary',

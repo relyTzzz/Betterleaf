@@ -32,6 +32,10 @@ const api: BetterleafApi = {
     ipcRenderer.invoke(IPC.setScheduleEnabled, id, enabled),
   runScheduleNow: (id) => ipcRenderer.invoke(IPC.runScheduleNow, id),
 
+  setDeviceLocked: (serialNo, locked) =>
+    ipcRenderer.invoke(IPC.setDeviceLocked, serialNo, locked),
+  setRoomLocked: (roomId, locked) => ipcRenderer.invoke(IPC.setRoomLocked, roomId, locked),
+
   setTrayEnabled: (enabled) => ipcRenderer.invoke(IPC.setTrayEnabled, enabled),
   setStartWithWindows: (enabled) =>
     ipcRenderer.invoke(IPC.setStartWithWindows, enabled),

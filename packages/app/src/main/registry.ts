@@ -40,9 +40,16 @@ import {
 } from './effects/file-source.js';
 import { EffectHarvester } from './effects/harvester.js';
 import { EffectLibrary, effectHash } from './effects/library.js';
+import { LockStore } from './lock-store.js';
 import { RoomStore } from './room-store.js';
 import { ScheduleStore } from './schedule-store.js';
-import { Scheduler, nextOccurrence, type SchedulerOptions } from './scheduler.js';
+import {
+  LOCKED_RESULT,
+  Scheduler,
+  nextOccurrence,
+  type ApplyOutcome,
+  type SchedulerOptions,
+} from './scheduler.js';
 import { DeviceStore } from './store.js';
 
 /**
@@ -79,6 +86,7 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
   readonly #rooms: RoomStore;
   readonly #schedules: ScheduleStore;
   readonly #scheduler: Scheduler;
+  readonly #locks: LockStore;
   readonly #library: EffectLibrary;
   readonly #harvester: EffectHarvester;
   readonly #devices = new Map<string, NanoleafDevice>();
@@ -95,6 +103,9 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
 
   /** Same idea for schedules: the snapshot is built synchronously. */
   #scheduleList: Schedule[] = [];
+
+  /** Serials the user is holding. Mirrors the lock store. */
+  #lockedSerials = new Set<string>();
 
   /**
    * Owned by the main process, not by this class — whether the app keeps running
@@ -128,6 +139,7 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     harvester?: EffectHarvester,
     schedules = new ScheduleStore(),
     schedulerOptions: SchedulerOptions = {},
+    locks = new LockStore(),
   ) {
     super();
     this.#store = store;
@@ -136,6 +148,7 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     this.#library = library;
     this.#harvester = harvester ?? new EffectHarvester(library);
     this.#schedules = schedules;
+    this.#locks = locks;
     this.#scheduler = new Scheduler(
       schedules,
       (target, action) => this.#applySchedule(target, action),
@@ -169,6 +182,7 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     const known = await this.#store.load();
     this.#roomList = await this.#rooms.load();
     this.#scheduleList = await this.#schedules.load();
+    this.#lockedSerials = new Set(await this.#locks.load());
     await this.#refreshLibrarySummaryQuietly();
     this.#scheduler.start();
     await this.scan(known);
@@ -311,8 +325,10 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     // the target of a schedule that can now never do anything.
     await this.#rooms.pruneDevice(serialNo);
     await this.#schedules.pruneDevice(serialNo);
+    await this.#locks.prune(serialNo);
     this.#roomList = await this.#rooms.load();
     this.#scheduleList = await this.#schedules.load();
+    this.#lockedSerials = new Set(await this.#locks.load());
     this.#publish();
   }
 
@@ -607,6 +623,29 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     return this.#scheduler.runNow(id);
   }
 
+  // --- locks -----------------------------------------------------------------
+
+  /**
+   * Hold a light, so schedules leave it alone until it is released.
+   *
+   * Nothing about manual control changes: locking is aimed at the scheduler,
+   * not at the person holding the app.
+   */
+  async setDeviceLocked(serialNo: string, locked: boolean): Promise<void> {
+    await this.#locks.setLocked(serialNo, locked);
+    this.#lockedSerials = new Set(await this.#locks.load());
+    this.#publish();
+  }
+
+  /** Lock or unlock every connected member of a room in one write. */
+  async setRoomLocked(roomId: string, locked: boolean): Promise<void> {
+    const serials = this.#membersOf(roomId).map((d) => d.serialNo);
+    if (serials.length === 0) return;
+    await this.#locks.setManyLocked(serials, locked);
+    this.#lockedSerials = new Set(await this.#locks.load());
+    this.#publish();
+  }
+
   /** Let the main process tell the renderer how the app is set to run. */
   setSettings(settings: AppSettings): void {
     this.#settings = settings;
@@ -629,12 +668,21 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
    * anyone means by "Nemo at sunset". Turning *off* stops there, since dimming
    * and re-scening something on its way out is pointless traffic.
    */
-  async #applySchedule(target: ScheduleTarget, action: ScheduleAction): Promise<void> {
+  async #applySchedule(
+    target: ScheduleTarget,
+    action: ScheduleAction,
+  ): Promise<ApplyOutcome> {
     if (target.kind === 'device') {
       const device = this.#devices.get(target.serialNo);
       if (!device) throw new Error('That light is not connected.');
+      // A locked light is skipped whole: no scene, no brightness, no power.
+      // One rule is easier to predict than a list of exceptions, and a lock
+      // that let a schedule dim the scene to 10% would not feel like a lock.
+      if (this.#lockedSerials.has(device.serialNo)) {
+        return { kind: 'skipped', reason: LOCKED_RESULT };
+      }
       await this.#applyToDevice(device, action);
-      return;
+      return { kind: 'ok' };
     }
 
     const members = this.#membersOf(target.roomId);
@@ -642,24 +690,29 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
       throw new Error('No lights in that room are connected.');
     }
 
+    const free = members.filter((d) => !this.#lockedSerials.has(d.serialNo));
+    // Every member held: nothing happened, and saying so beats a green tick.
+    if (free.length === 0) return { kind: 'skipped', reason: LOCKED_RESULT };
+
     // allSettled, not all: one unreachable light must not stop the rest of the
     // room from doing what was asked.
     const results = await Promise.allSettled(
-      members.map((device) => this.#applyToDevice(device, action)),
+      free.map((device) => this.#applyToDevice(device, action)),
     );
     const failures = results.flatMap((r, i) =>
       r.status === 'rejected'
-        ? [`${members[i]?.name ?? 'a light'}: ${(r.reason as Error).message}`]
+        ? [`${free[i]?.name ?? 'a light'}: ${(r.reason as Error).message}`]
         : [],
     );
-    if (failures.length === 0) return;
+    // Members the user locked are not failures — they were held on purpose.
+    if (failures.length === 0) return { kind: 'ok' };
 
     // Partial success is still a failure to do what the schedule said, and is
     // reported as one — with which lights, so it is actionable.
     throw new Error(
-      failures.length === members.length
+      failures.length === free.length
         ? failures.join('; ')
-        : `Applied to ${members.length - failures.length} of ${members.length} lights — ${failures.join('; ')}`,
+        : `Applied to ${free.length - failures.length} of ${free.length} lights — ${failures.join('; ')}`,
     );
   }
 
@@ -744,7 +797,7 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
 
     return {
       devices: [...this.#devices.values()].map((device) =>
-        toView(device, roomOf.get(device.serialNo)),
+        toView(device, roomOf.get(device.serialNo), this.#lockedSerials.has(device.serialNo)),
       ),
       libraryCount: this.#libraryCount,
       soundReactiveEffects: this.#soundReactiveNames,
@@ -822,6 +875,10 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
           i === 0 ? [...d.effects] : shared.filter((e) => d.effects.includes(e)),
         [],
       ),
+      // Every member, not any: a room reading "locked" while a schedule could
+      // still change one of its lights would be lying.
+      locked:
+        members.length > 0 && members.every((d) => this.#lockedSerials.has(d.serialNo)),
     };
     if (agreed !== undefined) view.currentEffect = agreed;
     return view;
@@ -840,7 +897,7 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
   }
 }
 
-function toView(device: NanoleafDevice, roomId?: string): DeviceView {
+function toView(device: NanoleafDevice, roomId?: string, locked = false): DeviceView {
   const render = toRenderLayout(device.layout);
   const view: DeviceView = {
     serialNo: device.serialNo,
@@ -853,6 +910,7 @@ function toView(device: NanoleafDevice, roomId?: string): DeviceView {
     state: device.state,
     effects: [...device.effects],
     currentEffect: device.currentEffect,
+    locked,
     capabilities: {
       touch: device.capabilities.touch,
       soundReactive: device.capabilities.soundReactive,

@@ -6,6 +6,7 @@ import {
   useApp,
 } from '../state/store.js';
 import type { DeviceView, UnpairedDeviceView } from '../../shared/types.js';
+import { LockIcon } from './LockIcon.js';
 import { StatusChip } from './StatusChip.js';
 
 export function DeviceList({ onPair }: { onPair: (device: UnpairedDeviceView) => void }) {
@@ -36,7 +37,10 @@ export function DeviceList({ onPair }: { onPair: (device: UnpairedDeviceView) =>
             }`}
             onClick={() => select({ kind: 'room', id: room.id })}
           >
-            <span className="room-name">{room.name}</span>
+            <span className="room-name">
+              {room.name}
+              {room.locked && <LockIcon />}
+            </span>
             <span className="room-count">
               {room.deviceSerials.length}
               {room.deviceSerials.length === 1 ? ' light' : ' lights'}
@@ -161,7 +165,10 @@ function DeviceRow({
       className={`device-card${selected ? ' selected' : ''}${indented ? ' indented' : ''}`}
       onClick={onSelect}
     >
-      <div className="name">{device.name}</div>
+      <div className="name">
+        {device.name}
+        {device.locked && <LockIcon />}
+      </div>
       <div className="meta">
         <StatusChip status={device.status} />
         <span>·</span>

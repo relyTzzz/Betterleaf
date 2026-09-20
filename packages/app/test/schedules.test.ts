@@ -14,6 +14,7 @@ const { DeviceRegistry } = await import('../src/main/registry.js');
 const { EffectHarvester } = await import('../src/main/effects/harvester.js');
 const { EffectLibrary } = await import('../src/main/effects/library.js');
 const { RoomStore } = await import('../src/main/room-store.js');
+const { LockStore } = await import('../src/main/lock-store.js');
 const { ScheduleStore } = await import('../src/main/schedule-store.js');
 const { Scheduler, mostRecentOccurrence, nextOccurrence } = await import(
   '../src/main/scheduler.js'
@@ -121,6 +122,7 @@ describe('the scheduler', () => {
       async (target, action) => {
         if (fail) throw new Error(fail);
         applied.push({ target, action });
+        return { kind: 'ok' as const };
       },
       { now: () => nowRef.value, graceMs: 120_000 },
     );
@@ -246,6 +248,26 @@ describe('the scheduler', () => {
     expect(applied).toHaveLength(0);
   });
 
+  it('records a held slot as held, not as done and not as broken', async () => {
+    const now = { value: at(2024, 3, 6, 7, 0) };
+    const store = new ScheduleStore(path.join(dir, 'schedules.json'));
+    const engine = new Scheduler(
+      store,
+      // What a locked light produces.
+      async () => ({ kind: 'skipped' as const, reason: 'locked' }),
+      { now: () => now.value, graceMs: 120_000 },
+    );
+    const id = await addSchedule(store, 7 * 60, at(2024, 3, 5, 7));
+
+    await engine.tick();
+
+    const saved = (await store.load()).find((s) => s.id === id);
+    expect(saved?.lastResult).toBe('locked');
+    // The slot is claimed either way, so unlocking at 9am does not immediately
+    // fire the 7am slot that was deliberately skipped.
+    expect(saved?.lastRunAt).toBe(at(2024, 3, 6, 7));
+  });
+
   it('records why a firing failed rather than claiming it worked', async () => {
     const now = { value: at(2024, 3, 6, 7, 0) };
     const { store, engine, failWith } = await scheduler(now);
@@ -341,6 +363,7 @@ describe('schedules against devices', () => {
       new ScheduleStore(path.join(dir, 'schedules.json')),
       // Never tick on its own: every test drives firing explicitly.
       { tickMs: 3_600_000 },
+      new LockStore(path.join(dir, 'locks.json')),
     );
     await registry.start();
     await waitFor(
@@ -484,6 +507,132 @@ describe('schedules against devices', () => {
     await reg.createSchedule({ ...base, name: 'Apple' });
 
     expect(reg.snapshot().schedules.map((s) => s.name)).toEqual(['Apple', 'Zebra']);
+  });
+
+  it('leaves a locked light alone entirely', async () => {
+    const { sims: started, registry: reg } = await setup(['NL29']);
+    const serialNo = started[0]!.serialNo;
+    const effect = reg.snapshot().devices[0]!.effects.at(-1)!;
+
+    // Something is playing, and the brightness is known.
+    await reg.setBrightness(serialNo, 80);
+    await waitFor(() => started[0]!.info.state.brightness.value === 80, 'brightness set');
+
+    await reg.setDeviceLocked(serialNo, true);
+    expect(reg.snapshot().devices[0]!.locked).toBe(true);
+
+    const id = await reg.createSchedule({
+      name: 'Should be held',
+      enabled: true,
+      target: { kind: 'device', serialNo },
+      timeMinutes: 7 * 60,
+      days: [0, 1, 2, 3, 4, 5, 6],
+      action: { power: true, effect, brightness: 10 },
+    });
+
+    const result = await reg.runScheduleNow(id);
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('locked');
+
+    // Nothing moved: not the scene, and not the brightness either. The lock is
+    // whole rather than scene-only.
+    expect(started[0]!.info.state.brightness.value).toBe(80);
+    expect(started[0]!.info.effects.select).not.toBe(effect);
+  });
+
+  it('still lets you drive a locked light by hand', async () => {
+    const { sims: started, registry: reg } = await setup(['NL29']);
+    const serialNo = started[0]!.serialNo;
+    await reg.setDeviceLocked(serialNo, true);
+
+    // A lock is aimed at the scheduler, not at the person holding the app.
+    await reg.setBrightness(serialNo, 33);
+    await waitFor(() => started[0]!.info.state.brightness.value === 33, 'manual write');
+  });
+
+  it('applies a room schedule to the members that are not locked', async () => {
+    const { sims: started, registry: reg } = await setup(['NL29', 'NL22']);
+    const roomId = await reg.createRoom('Office');
+    for (const sim of started) await reg.assignDevice(sim.serialNo, roomId);
+    for (const sim of started) await reg.setPower(sim.serialNo, true);
+    for (const sim of started) {
+      await waitFor(() => sim.info.state.on.value === true, 'on');
+    }
+
+    // Hold only the first light.
+    await reg.setDeviceLocked(started[0]!.serialNo, true);
+
+    const id = await reg.createSchedule({
+      name: 'Bedtime',
+      enabled: true,
+      target: { kind: 'room', roomId },
+      timeMinutes: 23 * 60,
+      days: [0, 1, 2, 3, 4, 5, 6],
+      action: { power: false },
+    });
+
+    expect((await reg.runScheduleNow(id)).ok).toBe(true);
+    await waitFor(() => started[1]!.info.state.on.value === false, 'unlocked member off');
+    expect(started[0]!.info.state.on.value).toBe(true);
+  });
+
+  it('reports a fully locked room as held rather than done', async () => {
+    const { sims: started, registry: reg } = await setup(['NL29', 'NL22']);
+    const roomId = await reg.createRoom('Office');
+    for (const sim of started) await reg.assignDevice(sim.serialNo, roomId);
+
+    await reg.setRoomLocked(roomId, true);
+    expect(reg.snapshot().rooms[0]!.locked).toBe(true);
+    expect(reg.snapshot().devices.every((d) => d.locked)).toBe(true);
+
+    const id = await reg.createSchedule({
+      name: 'Bedtime',
+      enabled: true,
+      target: { kind: 'room', roomId },
+      timeMinutes: 23 * 60,
+      days: [0, 1, 2, 3, 4, 5, 6],
+      action: { power: false },
+    });
+
+    const result = await reg.runScheduleNow(id);
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('locked');
+  });
+
+  it('a partly locked room does not claim to be locked', async () => {
+    const { sims: started, registry: reg } = await setup(['NL29', 'NL22']);
+    const roomId = await reg.createRoom('Office');
+    for (const sim of started) await reg.assignDevice(sim.serialNo, roomId);
+
+    await reg.setDeviceLocked(started[0]!.serialNo, true);
+
+    // "Every member", not "any": a room reading locked while a schedule could
+    // still change one of its lights would be lying.
+    expect(reg.snapshot().rooms[0]!.locked).toBe(false);
+  });
+
+  it('forgetting a device releases its lock', async () => {
+    const { sims: started, registry: reg } = await setup(['NL29']);
+    const serialNo = started[0]!.serialNo;
+    await reg.setDeviceLocked(serialNo, true);
+
+    await reg.forget(serialNo);
+
+    // A stale serial left in locks.json would silently hold a light that was
+    // later re-paired.
+    const locks = await new LockStore(path.join(dir, 'locks.json')).load();
+    expect(locks.has(serialNo)).toBe(false);
+  });
+
+  it('a lock survives a restart, because that is when it matters', async () => {
+    const { sims: started, registry: reg } = await setup(['NL29']);
+    const serialNo = started[0]!.serialNo;
+    await reg.setDeviceLocked(serialNo, true);
+
+    // A fresh store over the same file, as if the app had been restarted. The
+    // thing a lock defends against happens hours later, often after a restart.
+    const locks = await new LockStore(path.join(dir, 'locks.json')).load();
+    expect(locks.has(serialNo)).toBe(true);
   });
 
   it('shows the target name and the next run in the snapshot', async () => {

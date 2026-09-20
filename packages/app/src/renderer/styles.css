@@ -896,3 +896,56 @@ input[type='range'].ct {
   line-height: 1.55;
   margin: 2px 0 10px;
 }
+
+/* --- scene locks ---------------------------------------------------------- */
+
+/* Card headings that carry a control on the right. */
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.card-head > span:first-child {
+  flex: 1;
+}
+
+.lock-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  padding: 4px 10px;
+  /* The heading is uppercase with wide tracking; the control must not be. */
+  text-transform: none;
+  letter-spacing: normal;
+}
+.lock-toggle.on {
+  background: var(--accent-dim);
+  border-color: var(--accent-dim);
+  color: #eafffb;
+}
+
+.lock-icon {
+  flex: none;
+  /* Sits on the text baseline rather than the line box, like the music note. */
+  margin-bottom: -1px;
+}
+
+/* In the sidebar the padlock is an annotation, not the point of the row. */
+.device-card .name .lock-icon,
+.room-name .lock-icon {
+  color: var(--accent);
+  margin-left: 6px;
+}
+.device-card .name,
+.room-name {
+  display: flex;
+  align-items: center;
+}
+
+.lock-note {
+  font-size: 12px;
+  color: var(--text-faint);
+  line-height: 1.55;
+  margin: 12px 0 0;
+}

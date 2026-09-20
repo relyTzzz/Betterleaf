@@ -2,6 +2,7 @@ import { api, useApp } from '../state/store.js';
 import type { DeviceView } from '../../shared/types.js';
 import { EffectLibrary } from './EffectLibrary.js';
 import { LayoutPreview } from './LayoutPreview.js';
+import { LockNote, LockToggle } from './LockToggle.js';
 import { MusicNote } from './MusicNote.js';
 import { Slider } from './Slider.js';
 import { StatusChip } from './StatusChip.js';
@@ -124,7 +125,16 @@ export function DeviceDetail({ device }: { device: DeviceView }) {
       </div>
 
       <div className="card">
-        <h3>Effects</h3>
+        <h3 className="card-head">
+          <span>Effects</span>
+          <LockToggle
+            locked={device.locked}
+            what={device.currentEffect || 'this light'}
+            onToggle={() =>
+              void api().setDeviceLocked(device.serialNo, !device.locked)
+            }
+          />
+        </h3>
         <div className="effects">
           {device.effects.map((effect) => (
             <button
@@ -141,6 +151,7 @@ export function DeviceDetail({ device }: { device: DeviceView }) {
             <span style={{ color: 'var(--text-faint)' }}>No effects stored on this device.</span>
           )}
         </div>
+        {device.locked && <LockNote subject="this light" />}
       </div>
 
       <EffectLibrary device={device} />
