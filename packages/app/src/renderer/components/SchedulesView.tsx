@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api, useApp } from '../state/store.js';
 import type {
   AppSnapshot,
@@ -7,80 +7,34 @@ import type {
   ScheduleTarget,
   ScheduleView,
 } from '../../shared/types.js';
+import {
+  DAYS,
+  EVERY_DAY,
+  WEEKDAYS,
+  describeAction,
+  describeDays,
+  describeNextRun,
+  displayTime,
+  inputToMinutes,
+  minutesToInput,
+} from '../schedule-format.js';
 import { MusicNote } from './MusicNote.js';
 import { Slider } from './Slider.js';
 
-/** 0 = Sunday, matching `Date#getDay` and what the store keeps. */
-const DAYS = [
-  { value: 0, short: 'S', label: 'Sunday' },
-  { value: 1, short: 'M', label: 'Monday' },
-  { value: 2, short: 'T', label: 'Tuesday' },
-  { value: 3, short: 'W', label: 'Wednesday' },
-  { value: 4, short: 'T', label: 'Thursday' },
-  { value: 5, short: 'F', label: 'Friday' },
-  { value: 6, short: 'S', label: 'Saturday' },
-];
-
-const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6];
-const WEEKDAYS = [1, 2, 3, 4, 5];
-const WEEKENDS = [0, 6];
-
-function sameDays(a: number[], b: number[]): boolean {
-  return a.length === b.length && b.every((d) => a.includes(d));
-}
-
-function describeDays(days: number[]): string {
-  if (days.length === 0) return 'No days — never runs';
-  if (sameDays(days, EVERY_DAY)) return 'Every day';
-  if (sameDays(days, WEEKDAYS)) return 'Weekdays';
-  if (sameDays(days, WEEKENDS)) return 'Weekends';
-  return [...days]
-    .sort((a, b) => a - b)
-    .map((d) => DAYS[d]?.label.slice(0, 3) ?? '?')
-    .join(', ');
-}
-
-function minutesToInput(timeMinutes: number): string {
-  const h = Math.floor(timeMinutes / 60);
-  const m = timeMinutes % 60;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-}
-
-function inputToMinutes(value: string): number {
-  const [h, m] = value.split(':').map(Number);
-  if (!Number.isFinite(h) || !Number.isFinite(m)) return 0;
-  return Math.min(1439, Math.max(0, (h ?? 0) * 60 + (m ?? 0)));
-}
-
-/** "7:30 AM", in whatever the machine's locale calls it. */
-function displayTime(timeMinutes: number): string {
-  const d = new Date();
-  d.setHours(Math.floor(timeMinutes / 60), timeMinutes % 60, 0, 0);
-  return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-}
-
-function describeAction(action: ScheduleAction): string {
-  const parts: string[] = [];
-  if (action.power === false) return 'Turn off';
-  if (action.power === true) parts.push('Turn on');
-  if (action.effect !== undefined) parts.push(`play "${action.effect}"`);
-  if (action.brightness !== undefined) parts.push(`${action.brightness}% brightness`);
-  if (parts.length === 0) return 'Do nothing';
-  return parts.join(', ').replace(/^./, (c) => c.toUpperCase());
-}
-
-function describeNextRun(schedule: ScheduleView): string {
-  if (!schedule.enabled) return 'Paused';
-  if (schedule.nextRunAt === undefined) return 'Never — no days selected';
-
-  const next = new Date(schedule.nextRunAt);
-  const today = new Date();
-  const midnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const days = Math.round((next.getTime() - midnight.getTime()) / 86_400_000);
-
-  const when =
-    days === 0 ? 'today' : days === 1 ? 'tomorrow' : next.toLocaleDateString(undefined, { weekday: 'long' });
-  return `Next ${when} at ${next.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+/**
+ * A clock that re-renders the view as it advances.
+ *
+ * The countdown is derived from `nextRunAt`, which only changes when the main
+ * process republishes a snapshot. Without a tick of its own, "in 18 min" would
+ * sit there saying 18 until something unrelated happened to the lights.
+ */
+function useNow(intervalMs = 20_000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
 }
 
 /** Scenes that can actually be applied to this target. */
@@ -111,6 +65,7 @@ function blankSchedule(snapshot: AppSnapshot): ScheduleInput | undefined {
 
 export function SchedulesView() {
   const snapshot = useApp((s) => s.snapshot);
+  const now = useNow();
   const [editing, setEditing] = useState<{ id?: string; draft: ScheduleInput } | undefined>();
   const [ranJustNow, setRanJustNow] = useState<Record<string, string>>({});
 
@@ -181,6 +136,7 @@ export function SchedulesView() {
           <ScheduleRow
             key={schedule.id}
             schedule={schedule}
+            now={now}
             note={ranJustNow[schedule.id]}
             onEdit={() => startEdit(schedule)}
             onRunNow={() => void runNow(schedule)}
@@ -247,11 +203,13 @@ function RunningSettings() {
 
 function ScheduleRow({
   schedule,
+  now,
   note,
   onEdit,
   onRunNow,
 }: {
   schedule: ScheduleView;
+  now: number;
   note?: string;
   onEdit: () => void;
   onRunNow: () => void;
@@ -281,7 +239,7 @@ function ScheduleRow({
           )}
         </div>
         <div className="schedule-meta faint">
-          {describeNextRun(schedule)}
+          {describeNextRun(schedule, now)}
           {schedule.lastResult && schedule.lastResult !== 'ok' && (
             <>
               {' · '}
