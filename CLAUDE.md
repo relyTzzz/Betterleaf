@@ -107,6 +107,13 @@ without hardware.
 - **Tearing down an SSE socket emits ECONNRESET.** Attach a sink error handler
   before `destroy()`, or it escapes as an uncaught exception. Teardown happens on
   every reconnect, so this is not an edge case.
+- **`getLoginItemSettings` must be passed the same `args` as the setter.** On
+  Windows it compares the stored command line against what you give it, so
+  registering the login item with `--hidden` and reading it back with no args
+  reports `openAtLogin: false` while the registry entry sits there plainly. The
+  symptom is a "Start with Windows" checkbox that un-ticks itself the instant it
+  is ticked, and a registry that says it worked. Verified by round-trip: set with
+  no args reads true bare and false with args, and vice versa.
 - **Never retry a 401/403.** A revoked token is terminal; only re-pairing fixes
   it. Retrying produces a storm against a device that will never say yes.
 - **Hue is 0–360; saturation and brightness are 0–100.** Mismatched ranges are a

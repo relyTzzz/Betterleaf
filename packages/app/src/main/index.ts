@@ -29,6 +29,23 @@ let tray: Tray | undefined;
  */
 let quitting = false;
 
+/**
+ * The arguments the login item is registered with, so signing in brings
+ * Betterleaf up in the tray rather than throwing a window in your face.
+ *
+ * These have to be passed to `getLoginItemSettings` as well as to the setter.
+ * On Windows the getter compares the stored command line against the `args` it
+ * is given, so reading back with none reports `openAtLogin: false` even when
+ * the registry entry is sitting right there — the toggle then appears to do
+ * nothing, because it un-ticks itself the instant it is ticked.
+ */
+const LOGIN_ITEM_ARGS = ['--hidden'];
+
+/** Whether the login item exists, asked in the one way that answers truthfully. */
+function startsWithWindows(): boolean {
+  return app.getLoginItemSettings({ args: LOGIN_ITEM_ARGS }).openAtLogin;
+}
+
 /** Mirrors the store, plus the login-item state Electron owns. */
 let settings: AppSettings = {
   trayEnabled: true,
@@ -208,14 +225,12 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.setStartWithWindows, (_e, enabled: boolean) => {
     if (!settings.startWithWindowsSupported) return;
-    // `--hidden` so signing in does not open a window; Betterleaf just starts
-    // sitting in the tray, ready for whatever the first schedule is.
-    app.setLoginItemSettings({ openAtLogin: enabled, args: ['--hidden'] });
+    app.setLoginItemSettings({ openAtLogin: enabled, args: LOGIN_ITEM_ARGS });
     applySettings({
       ...settings,
       // Read back rather than assume: if Windows refused, the toggle should
       // show what is actually true.
-      startWithWindows: app.getLoginItemSettings().openAtLogin,
+      startWithWindows: startsWithWindows(),
     });
   });
 
@@ -285,9 +300,7 @@ void app.whenReady().then(async () => {
   const stored = await settingsStore.load();
   applySettings({
     trayEnabled: stored.trayEnabled,
-    startWithWindows: settings.startWithWindowsSupported
-      ? app.getLoginItemSettings().openAtLogin
-      : false,
+    startWithWindows: settings.startWithWindowsSupported ? startsWithWindows() : false,
     startWithWindowsSupported: settings.startWithWindowsSupported,
   });
 
