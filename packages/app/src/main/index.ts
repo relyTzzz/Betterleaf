@@ -1,6 +1,11 @@
 import { join } from 'node:path';
 import { BrowserWindow, Menu, Tray, app, ipcMain, nativeImage, shell } from 'electron';
-import { IPC, type AppSettings, type ScheduleInput } from '../shared/types.js';
+import {
+  IPC,
+  type AppRuleInput,
+  type AppSettings,
+  type ScheduleInput,
+} from '../shared/types.js';
 import { DeviceRegistry } from './registry.js';
 import { SettingsStore } from './settings-store.js';
 
@@ -217,6 +222,21 @@ function registerIpc(): void {
     registry.setScheduleEnabled(id, enabled),
   );
   ipcMain.handle(IPC.runScheduleNow, (_e, id: string) => registry.runScheduleNow(id));
+
+  ipcMain.handle(IPC.createAppRule, (_e, input: AppRuleInput) =>
+    registry.createAppRule(input),
+  );
+  ipcMain.handle(IPC.updateAppRule, (_e, id: string, input: AppRuleInput) =>
+    registry.updateAppRule(id, input),
+  );
+  ipcMain.handle(IPC.deleteAppRule, (_e, id: string) => registry.deleteAppRule(id));
+  ipcMain.handle(IPC.setAppRuleEnabled, (_e, id: string, enabled: boolean) =>
+    registry.setAppRuleEnabled(id, enabled),
+  );
+  ipcMain.handle(IPC.reorderAppRules, (_e, ids: string[]) =>
+    registry.reorderAppRules(ids),
+  );
+  ipcMain.handle(IPC.listRunningApps, () => registry.listRunningApps());
 
   ipcMain.handle(IPC.setDeviceLocked, (_e, serial: string, locked: boolean) =>
     registry.setDeviceLocked(serial, locked),

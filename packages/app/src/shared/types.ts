@@ -198,6 +198,56 @@ export interface AppSettings {
 }
 
 /**
+ * A scene that plays while a particular program is running.
+ *
+ * Reuses `ScheduleTarget` and `ScheduleAction` deliberately: "put these lights
+ * into that state" is the same idea whether a clock or a running program asked
+ * for it, and one action model means one set of rules about what happens.
+ */
+export interface AppRule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  /**
+   * Executable names that activate this rule, lowercased — `overwatch.exe`.
+   * Several, so one rule can cover a launcher and its game.
+   */
+  processNames: string[];
+  target: ScheduleTarget;
+  action: ScheduleAction;
+  /**
+   * 0 is highest. When several rules match at once the lowest number wins, so
+   * "Gaming" can outrank "Working" without either having to know about the
+   * other. Kept contiguous by the store.
+   */
+  priority: number;
+}
+
+export type AppRuleInput = Omit<AppRule, 'id' | 'priority'>;
+
+export interface AppRuleView extends AppRule {
+  /** The room or light this points at, or undefined once it is gone. */
+  targetName?: string;
+  /** True when one of its processes is running right now. */
+  matching: boolean;
+  /**
+   * True when this rule is the one currently holding its target.
+   *
+   * Different from `matching`: a lower-priority rule can match without holding
+   * anything, because something above it won.
+   */
+  holding: boolean;
+  /** Which process name matched, for showing why it is active. */
+  matchedProcess?: string;
+}
+
+/** A program currently running, offered so rules can be built without typing. */
+export interface RunningApp {
+  /** Executable name, lowercased. */
+  processName: string;
+}
+
+/**
  * An archived effect, as the renderer sees it.
  *
  * `onDevices` is computed live from the devices themselves rather than stored:
@@ -278,6 +328,7 @@ export interface AppSnapshot {
   soundReactiveEffects: string[];
   rooms: RoomView[];
   schedules: ScheduleView[];
+  appRules: AppRuleView[];
   settings: AppSettings;
   unpaired: UnpairedDeviceView[];
   discovery: DiscoveryState;
@@ -324,6 +375,15 @@ export interface BetterleafApi {
   setDeviceLocked(serialNo: string, locked: boolean): Promise<void>;
   /** Lock or unlock every connected member of a room at once. */
   setRoomLocked(roomId: string, locked: boolean): Promise<void>;
+
+  createAppRule(input: AppRuleInput): Promise<string>;
+  updateAppRule(id: string, input: AppRuleInput): Promise<void>;
+  deleteAppRule(id: string): Promise<void>;
+  setAppRuleEnabled(id: string, enabled: boolean): Promise<void>;
+  /** Highest priority first. Ids not mentioned keep their relative order. */
+  reorderAppRules(ids: string[]): Promise<void>;
+  /** Programs running right now, so a rule can be built without typing names. */
+  listRunningApps(): Promise<RunningApp[]>;
 
   setTrayEnabled(enabled: boolean): Promise<void>;
   setStartWithWindows(enabled: boolean): Promise<void>;
@@ -373,6 +433,12 @@ export const IPC = {
   deleteSchedule: 'betterleaf:deleteSchedule',
   setScheduleEnabled: 'betterleaf:setScheduleEnabled',
   runScheduleNow: 'betterleaf:runScheduleNow',
+  createAppRule: 'betterleaf:createAppRule',
+  updateAppRule: 'betterleaf:updateAppRule',
+  deleteAppRule: 'betterleaf:deleteAppRule',
+  setAppRuleEnabled: 'betterleaf:setAppRuleEnabled',
+  reorderAppRules: 'betterleaf:reorderAppRules',
+  listRunningApps: 'betterleaf:listRunningApps',
   setDeviceLocked: 'betterleaf:setDeviceLocked',
   setRoomLocked: 'betterleaf:setRoomLocked',
   setTrayEnabled: 'betterleaf:setTrayEnabled',

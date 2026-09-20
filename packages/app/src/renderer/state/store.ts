@@ -21,7 +21,8 @@ export type Selection =
   | { kind: 'device'; id: string }
   | { kind: 'room'; id: string }
   | { kind: 'library' }
-  | { kind: 'schedules' };
+  | { kind: 'schedules' }
+  | { kind: 'app-rules' };
 
 interface AppState {
   snapshot: AppSnapshot;
@@ -38,6 +39,7 @@ const EMPTY: AppSnapshot = {
   soundReactiveEffects: [],
   rooms: [],
   schedules: [],
+  appRules: [],
   settings: {
     trayEnabled: true,
     startWithWindows: false,
@@ -50,7 +52,13 @@ const EMPTY: AppSnapshot = {
 /** Does this selection still point at something that exists? */
 function stillValid(selection: Selection | undefined, snapshot: AppSnapshot): boolean {
   if (!selection) return false;
-  if (selection.kind === 'library' || selection.kind === 'schedules') return true;
+  if (
+    selection.kind === 'library' ||
+    selection.kind === 'schedules' ||
+    selection.kind === 'app-rules'
+  ) {
+    return true;
+  }
   return selection.kind === 'device'
     ? snapshot.devices.some((d) => d.serialNo === selection.id)
     : snapshot.rooms.some((r) => r.id === selection.id);

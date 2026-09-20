@@ -20,6 +20,14 @@ export type ApplyOutcome = { kind: 'ok' } | { kind: 'skipped'; reason: string };
  */
 export const LOCKED_RESULT = 'locked';
 
+/**
+ * Recorded as `lastResult` when an app rule was driving the lights.
+ *
+ * A running program owns its target for as long as it is open, so a schedule
+ * firing underneath it is skipped rather than allowed to steal the scene.
+ */
+export const HELD_BY_APP_RESULT = 'held-by-app';
+
 /** What actually drives the lights when a schedule fires. */
 export type ApplySchedule = (
   target: ScheduleTarget,

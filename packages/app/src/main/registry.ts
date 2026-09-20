@@ -14,6 +14,9 @@ import {
   type ProbeResult,
 } from '@betterleaf/protocol';
 import type {
+  AppRule,
+  AppRuleInput,
+  AppRuleView,
   AppSettings,
   AppSnapshot,
   DeviceView,
@@ -24,6 +27,7 @@ import type {
   PairResult,
   Room,
   RoomView,
+  RunningApp,
   Schedule,
   ScheduleAction,
   ScheduleInput,
@@ -40,10 +44,14 @@ import {
 } from './effects/file-source.js';
 import { EffectHarvester } from './effects/harvester.js';
 import { EffectLibrary, effectHash } from './effects/library.js';
+import { AppRuleStore, targetKey, type CapturedDevice } from './app-rule-store.js';
+import { AppRuleEngine, type AppRuleEngineOptions } from './app-rules.js';
 import { LockStore } from './lock-store.js';
+import { listRunningProcesses, matchProcess, type ListProcesses } from './process-watch.js';
 import { RoomStore } from './room-store.js';
 import { ScheduleStore } from './schedule-store.js';
 import {
+  HELD_BY_APP_RESULT,
   LOCKED_RESULT,
   Scheduler,
   nextOccurrence,
@@ -87,6 +95,8 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
   readonly #schedules: ScheduleStore;
   readonly #scheduler: Scheduler;
   readonly #locks: LockStore;
+  readonly #appRules: AppRuleStore;
+  readonly #ruleEngine: AppRuleEngine;
   readonly #library: EffectLibrary;
   readonly #harvester: EffectHarvester;
   readonly #devices = new Map<string, NanoleafDevice>();
@@ -106,6 +116,11 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
 
   /** Serials the user is holding. Mirrors the lock store. */
   #lockedSerials = new Set<string>();
+
+  /** Rules, and the serials an active rule is currently driving. */
+  #appRuleList: AppRule[] = [];
+  #heldSerials = new Set<string>();
+  #holdingRuleIds = new Set<string>();
 
   /**
    * Owned by the main process, not by this class — whether the app keeps running
@@ -140,6 +155,9 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     schedules = new ScheduleStore(),
     schedulerOptions: SchedulerOptions = {},
     locks = new LockStore(),
+    appRules = new AppRuleStore(),
+    listProcesses: ListProcesses = listRunningProcesses,
+    ruleEngineOptions: AppRuleEngineOptions = {},
   ) {
     super();
     this.#store = store;
@@ -149,6 +167,42 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     this.#harvester = harvester ?? new EffectHarvester(library);
     this.#schedules = schedules;
     this.#locks = locks;
+    this.#appRules = appRules;
+    this.#ruleEngine = new AppRuleEngine(
+      appRules,
+      listProcesses,
+      {
+        serialsFor: (target) =>
+          target.kind === 'device'
+            ? this.#devices.has(target.serialNo)
+              ? [target.serialNo]
+              : []
+            : this.#membersOf(target.roomId).map((d) => d.serialNo),
+        capture: (serials) =>
+          serials.flatMap((serial) => {
+            const captured = this.#captureDevice(serial);
+            return captured ? [captured] : [];
+          }),
+        // A locked light is left alone by rules too: a lock means "leave this
+        // alone", and carving out an exception for one of the two things that
+        // move lights on their own would make it mean much less.
+        apply: async (target, action) => {
+          // `heldByRule: false`: the engine is the thing doing the holding, and
+          // must not be refused by its own hold.
+          const outcome = await this.#applySchedule(target, action, {
+            heldByRule: false,
+          });
+          if (outcome.kind !== 'ok') {
+            throw new Error('Nothing to apply — the target is locked or gone.');
+          }
+        },
+        restoreDevice: (state) => this.#restoreDevice(state),
+        current: (serial) => this.#captureDevice(serial),
+      },
+      ruleEngineOptions,
+    );
+
+    this.#ruleEngine.on('changed', () => void this.#refreshAppRules());
     this.#scheduler = new Scheduler(
       schedules,
       (target, action) => this.#applySchedule(target, action),
@@ -183,8 +237,10 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     this.#roomList = await this.#rooms.load();
     this.#scheduleList = await this.#schedules.load();
     this.#lockedSerials = new Set(await this.#locks.load());
+    this.#appRuleList = await this.#appRules.load();
     await this.#refreshLibrarySummaryQuietly();
     this.#scheduler.start();
+    this.#ruleEngine.start();
     await this.scan(known);
   }
 
@@ -326,6 +382,8 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     await this.#rooms.pruneDevice(serialNo);
     await this.#schedules.pruneDevice(serialNo);
     await this.#locks.prune(serialNo);
+    await this.#appRules.pruneDevice(serialNo);
+    this.#appRuleList = await this.#appRules.load();
     this.#roomList = await this.#rooms.load();
     this.#scheduleList = await this.#schedules.load();
     this.#lockedSerials = new Set(await this.#locks.load());
@@ -533,7 +591,9 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     await this.#rooms.remove(roomId);
     // Same reasoning as forgetting a device: no schedule may outlive its target.
     await this.#schedules.pruneRoom(roomId);
+    await this.#appRules.pruneRoom(roomId);
     this.#scheduleList = await this.#schedules.load();
+    this.#appRuleList = await this.#appRules.load();
     await this.#refreshRooms();
   }
 
@@ -671,6 +731,7 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
   async #applySchedule(
     target: ScheduleTarget,
     action: ScheduleAction,
+    { heldByRule = true }: { heldByRule?: boolean } = {},
   ): Promise<ApplyOutcome> {
     if (target.kind === 'device') {
       const device = this.#devices.get(target.serialNo);
@@ -681,6 +742,9 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
       if (this.#lockedSerials.has(device.serialNo)) {
         return { kind: 'skipped', reason: LOCKED_RESULT };
       }
+      if (heldByRule && this.#heldSerials.has(device.serialNo)) {
+        return { kind: 'skipped', reason: HELD_BY_APP_RESULT };
+      }
       await this.#applyToDevice(device, action);
       return { kind: 'ok' };
     }
@@ -690,9 +754,18 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
       throw new Error('No lights in that room are connected.');
     }
 
-    const free = members.filter((d) => !this.#lockedSerials.has(d.serialNo));
+    const blocked = (d: NanoleafDevice) =>
+      this.#lockedSerials.has(d.serialNo) ||
+      (heldByRule && this.#heldSerials.has(d.serialNo));
+    const free = members.filter((d) => !blocked(d));
     // Every member held: nothing happened, and saying so beats a green tick.
-    if (free.length === 0) return { kind: 'skipped', reason: LOCKED_RESULT };
+    if (free.length === 0) {
+      const allLocked = members.every((d) => this.#lockedSerials.has(d.serialNo));
+      return {
+        kind: 'skipped',
+        reason: allLocked ? LOCKED_RESULT : HELD_BY_APP_RESULT,
+      };
+    }
 
     // allSettled, not all: one unreachable light must not stop the rest of the
     // room from doing what was asked.
@@ -731,6 +804,90 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     }
 
     if (action.brightness !== undefined) await device.setBrightness(action.brightness);
+  }
+
+  // --- app rules -------------------------------------------------------------
+
+  async createAppRule(input: AppRuleInput): Promise<string> {
+    const rule = await this.#appRules.create(input);
+    await this.#refreshAppRules();
+    // Evaluate straight away, so a rule made while the program is already
+    // running takes effect now rather than at the next poll.
+    void this.#ruleEngine.evaluate();
+    return rule.id;
+  }
+
+  async updateAppRule(id: string, input: AppRuleInput): Promise<void> {
+    await this.#appRules.update(id, input);
+    await this.#refreshAppRules();
+    void this.#ruleEngine.evaluate();
+  }
+
+  async deleteAppRule(id: string): Promise<void> {
+    await this.#appRules.remove(id);
+    await this.#refreshAppRules();
+    void this.#ruleEngine.evaluate();
+  }
+
+  async setAppRuleEnabled(id: string, enabled: boolean): Promise<void> {
+    await this.#appRules.setEnabled(id, enabled);
+    await this.#refreshAppRules();
+    void this.#ruleEngine.evaluate();
+  }
+
+  async reorderAppRules(ids: string[]): Promise<void> {
+    await this.#appRules.reorder(ids);
+    await this.#refreshAppRules();
+    void this.#ruleEngine.evaluate();
+  }
+
+  /** Programs running now, so a rule can be built by picking rather than typing. */
+  async listRunningApps(): Promise<RunningApp[]> {
+    // Reads the list unconditionally, unlike `evaluate`, which skips it when no
+    // rule is watching for anything.
+    await this.#ruleEngine.refreshProcesses();
+    await this.#ruleEngine.evaluate();
+    // Awaited rather than left to the `changed` event: after this resolves the
+    // snapshot must already agree with what the evaluate just decided, or a
+    // caller reading it straight back sees the previous state.
+    await this.#refreshAppRules();
+    return [...this.#ruleEngine.processes]
+      .sort((a, b) => a.localeCompare(b))
+      .map((processName) => ({ processName }));
+  }
+
+  async #refreshAppRules(): Promise<void> {
+    this.#appRuleList = await this.#appRules.load();
+    this.#heldSerials = await this.#ruleEngine.heldSerials();
+    this.#holdingRuleIds = await this.#ruleEngine.holdingRuleIds();
+    this.#publish();
+  }
+
+  /** What a light is showing right now, as a restore point. */
+  #captureDevice(serialNo: string): CapturedDevice | undefined {
+    const device = this.#devices.get(serialNo);
+    if (!device) return undefined;
+    return {
+      serialNo,
+      on: device.state.on,
+      brightness: device.state.brightness,
+      effect: device.currentEffect,
+    };
+  }
+
+  /** Put a light back the way a rule found it. */
+  async #restoreDevice(state: CapturedDevice): Promise<void> {
+    const device = this.#devices.get(state.serialNo);
+    if (!device) return;
+    if (!state.on) {
+      await device.setPower(false);
+      return;
+    }
+    await device.setPower(true);
+    if (state.effect && device.effects.includes(state.effect)) {
+      await device.selectEffect(state.effect);
+    }
+    await device.setBrightness(state.brightness);
   }
 
   // --- pairing ---------------------------------------------------------------
@@ -814,10 +971,33 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
             a.order - b.order,
         )
         .map((schedule) => this.#toScheduleView(schedule)),
+      appRules: this.#appRuleList.map((rule) => this.#toAppRuleView(rule)),
       settings: this.#settings,
       unpaired: this.#unpaired,
       discovery: this.#discovery,
     };
+  }
+
+  #toAppRuleView(rule: AppRule): AppRuleView {
+    const view: AppRuleView = {
+      ...rule,
+      matching: false,
+      holding: this.#holdingRuleIds.has(rule.id),
+    };
+
+    const target = rule.target;
+    const name =
+      target.kind === 'device'
+        ? this.#devices.get(target.serialNo)?.name
+        : this.#roomList.find((r) => r.id === target.roomId)?.name;
+    if (name !== undefined) view.targetName = name;
+
+    const matched = matchProcess(rule.processNames, this.#ruleEngine.processes as Set<string>);
+    if (matched !== undefined) {
+      view.matching = true;
+      view.matchedProcess = matched;
+    }
+    return view;
   }
 
   #toScheduleView(schedule: Schedule): ScheduleView {
@@ -891,6 +1071,7 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
   async dispose(): Promise<void> {
     this.#pairAbort?.abort();
     this.#scheduler.stop();
+    this.#ruleEngine.stop();
     this.#harvester.stop();
     await Promise.all([...this.#devices.values()].map((d) => d.close()));
     this.#devices.clear();

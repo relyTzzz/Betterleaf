@@ -32,6 +32,14 @@ const api: BetterleafApi = {
     ipcRenderer.invoke(IPC.setScheduleEnabled, id, enabled),
   runScheduleNow: (id) => ipcRenderer.invoke(IPC.runScheduleNow, id),
 
+  createAppRule: (input) => ipcRenderer.invoke(IPC.createAppRule, input),
+  updateAppRule: (id, input) => ipcRenderer.invoke(IPC.updateAppRule, id, input),
+  deleteAppRule: (id) => ipcRenderer.invoke(IPC.deleteAppRule, id),
+  setAppRuleEnabled: (id, enabled) =>
+    ipcRenderer.invoke(IPC.setAppRuleEnabled, id, enabled),
+  reorderAppRules: (ids) => ipcRenderer.invoke(IPC.reorderAppRules, ids),
+  listRunningApps: () => ipcRenderer.invoke(IPC.listRunningApps),
+
   setDeviceLocked: (serialNo, locked) =>
     ipcRenderer.invoke(IPC.setDeviceLocked, serialNo, locked),
   setRoomLocked: (roomId, locked) => ipcRenderer.invoke(IPC.setRoomLocked, roomId, locked),

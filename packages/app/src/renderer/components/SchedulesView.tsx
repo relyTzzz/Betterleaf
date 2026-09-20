@@ -246,6 +246,8 @@ function ScheduleRow({
           {describeNextRun(schedule, now)}
           {schedule.lastResult === 'locked' ? (
             <> · held — the scene was locked</>
+          ) : schedule.lastResult === 'held-by-app' ? (
+            <> · held — an app scene was playing</>
           ) : (
             schedule.lastResult &&
             schedule.lastResult !== 'ok' && (

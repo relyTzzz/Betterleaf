@@ -949,3 +949,52 @@ input[type='range'].ct {
   line-height: 1.55;
   margin: 12px 0 0;
 }
+
+/* --- app scene rules ------------------------------------------------------ */
+
+.rule-card .rank {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 34px;
+  flex: none;
+}
+.rule-card .rank span {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+.rule-card .rank button {
+  padding: 1px 7px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.badge {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+  font-weight: 600;
+  margin-left: 2px;
+}
+.badge.live {
+  border-color: var(--accent-dim);
+  background: var(--accent-dim);
+  color: #eafffb;
+}
+
+/* The datalist input needs the same treatment as the other editor fields. */
+.schedule-editor input[list] {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+}

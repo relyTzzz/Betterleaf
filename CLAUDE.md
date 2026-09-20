@@ -38,7 +38,7 @@ Concretely, four things carry that weight. Don't undo them without a reason:
 
 ## Testing
 
-`pnpm test` runs 202 tests against `tools/simulator` — no hardware required.
+`pnpm test` runs 221 tests against `tools/simulator` — no hardware required.
 
 - The simulator emulates the awkward parts on purpose: 401 before pairing, an
   empty extControl body on Canvas, a Rhythm pseudo-panel in the NL22 layout,
@@ -117,6 +117,43 @@ The timing rules live in `main/scheduler.ts`, which deliberately knows nothing
 about devices, rooms or Electron — it decides *when* and hands the *what* to an
 apply function. That is what makes the easy-to-get-subtly-wrong part testable
 without hardware.
+
+## App scenes
+
+A rule plays a scene while a named program is running, and puts the lights back
+afterwards. `main/app-rules.ts` holds the logic; it takes a process lister and a
+small ops interface so it is testable without devices or a real process list.
+
+- **"Running", not "focused".** Reading the foreground window's owner needs
+  Win32 calls, which would mean a native addon or spawning PowerShell every few
+  seconds. Both cost far more than the question is worth. An app that sits in the
+  tray all day is therefore a poor choice for a rule, and the UI says so.
+- **Enumerating processes is expensive.** `tasklist` measures at roughly **550ms**
+  per run on a normal desktop — not the "few milliseconds" it is easy to assume.
+  So: the poll is 10s, and `evaluate()` **skips the listing entirely** when no
+  enabled rule names a program and nothing is being held. An install with no
+  rules pays nothing. `refreshProcesses()` is the deliberate way to list anyway,
+  for the editor's suggestions.
+- **Edge-triggered, never continuously enforced.** The engine acts when the
+  winning rule changes and otherwise leaves the lights alone. Re-applying every
+  poll would fight anyone adjusting a light by hand while the program was open.
+- **Priority is one ordered list**, lowest number first, kept contiguous by the
+  store. One winner per target, so two rules pointing at the same room cannot
+  both drive it.
+- **The restore point is captured before applying**, and when one rule takes over
+  from another the *original* capture is carried across. Otherwise handing back
+  would restore the first rule's scene rather than what it displaced.
+- **A restore only happens if the light still shows what the rule set**
+  (`stillHolding`). If you changed the scene by hand mid-game, putting the old
+  one back would be undoing your change, not tidying up after the rule.
+- **Holds persist** (`app-rules.json`). Betterleaf restarting while the game is
+  still running must not capture the game's own scene as the thing to go back to.
+- **App rules outrank schedules.** A schedule firing at a light a rule is driving
+  is skipped and recorded as `held-by-app`. A lock outranks both.
+- `evaluate()` **joins an in-flight pass** rather than returning early, so a
+  caller that awaits it can rely on the state being settled — the same fix the
+  harvester needed. Returning early had `createAppRule` racing its own evaluate
+  and the snapshot reporting a rule idle while it was already playing.
 
 ## Things that have already bitten
 
