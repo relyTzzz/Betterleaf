@@ -998,3 +998,70 @@ input[type='range'].ct {
   font: inherit;
   font-size: 13px;
 }
+
+/* --- program pickers ------------------------------------------------------ */
+
+.process-list {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 12.5px;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  resize: vertical;
+  user-select: text;
+  /* Paths are long; wrapping beats a horizontal scrollbar in a dialog. */
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.hint code {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 11.5px;
+  background: var(--bg-raised);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.running-picker summary {
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.running-filter {
+  width: 100%;
+  margin: 4px 0 6px;
+}
+
+.running-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  max-height: 150px;
+  overflow-y: auto;
+  padding: 2px;
+}
+.running-list button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  padding: 4px 8px;
+  max-width: 100%;
+}
+.running-list .no-path {
+  color: var(--text-faint);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+/* A path is shown by its executable, with the whole thing on the tooltip. */
+.path-entry {
+  border-bottom: 1px dotted var(--text-faint);
+  cursor: help;
+}

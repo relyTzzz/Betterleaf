@@ -851,9 +851,24 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     // snapshot must already agree with what the evaluate just decided, or a
     // caller reading it straight back sees the previous state.
     await this.#refreshAppRules();
-    return [...this.#ruleEngine.processes]
-      .sort((a, b) => a.localeCompare(b))
-      .map((processName) => ({ processName }));
+
+    const { names, paths } = this.#ruleEngine.processes;
+    // Paths are offered first and named by their executable, so the suggestion
+    // list reads as programs rather than as a wall of directories. Names with no
+    // path follow, for the processes Windows would not tell us about.
+    const byName = new Map<string, RunningApp>();
+    for (const path of paths) {
+      const base = path.split('\\').pop() ?? path;
+      if (!byName.has(path)) byName.set(path, { processName: base, path });
+    }
+    for (const name of names) {
+      if (![...paths].some((p) => p.endsWith(`\\${name}`))) {
+        byName.set(name, { processName: name });
+      }
+    }
+    return [...byName.values()].sort((a, b) =>
+      a.processName.localeCompare(b.processName),
+    );
   }
 
   async #refreshAppRules(): Promise<void> {
@@ -992,7 +1007,7 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
         : this.#roomList.find((r) => r.id === target.roomId)?.name;
     if (name !== undefined) view.targetName = name;
 
-    const matched = matchProcess(rule.processNames, this.#ruleEngine.processes as Set<string>);
+    const matched = matchProcess(rule.processNames, this.#ruleEngine.processes);
     if (matched !== undefined) {
       view.matching = true;
       view.matchedProcess = matched;

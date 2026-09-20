@@ -1,7 +1,13 @@
 import { EventEmitter } from 'node:events';
 import type { AppRule, ScheduleAction, ScheduleTarget } from '../shared/types.js';
 import { targetKey, type CapturedDevice, type AppRuleStore } from './app-rule-store.js';
-import { matchProcess, type ListProcesses } from './process-watch.js';
+import {
+  matchProcess,
+  type ListProcesses,
+  type ProcessSnapshot,
+} from './process-watch.js';
+
+const NOTHING_RUNNING: ProcessSnapshot = { names: new Set(), paths: new Set() };
 
 /**
  * What the engine needs from the rest of the app.
@@ -80,7 +86,7 @@ export class AppRuleEngine extends EventEmitter<Events> {
   /** The pass currently running, so concurrent callers can join it. */
   #inFlight: Promise<void> | undefined;
   /** Last seen process list, for the UI and for `matching` flags. */
-  #processes = new Set<string>();
+  #processes: ProcessSnapshot = NOTHING_RUNNING;
 
   constructor(
     store: AppRuleStore,
@@ -109,7 +115,7 @@ export class AppRuleEngine extends EventEmitter<Events> {
   }
 
   /** The most recent process list, for building rules and showing state. */
-  get processes(): ReadonlySet<string> {
+  get processes(): ProcessSnapshot {
     return this.#processes;
   }
 
@@ -120,7 +126,7 @@ export class AppRuleEngine extends EventEmitter<Events> {
    * deliberately skips the listing when nothing needs it, so it cannot be used
    * for this.
    */
-  async refreshProcesses(): Promise<ReadonlySet<string>> {
+  async refreshProcesses(): Promise<ProcessSnapshot> {
     this.#processes = await this.#list();
     return this.#processes;
   }
@@ -177,7 +183,7 @@ export class AppRuleEngine extends EventEmitter<Events> {
     // user with no rules should not pay it at all.
     const watching = rules.some((r) => r.enabled && r.processNames.length > 0);
     if (!watching && holds.length === 0) {
-      this.#processes = new Set();
+      this.#processes = NOTHING_RUNNING;
       return;
     }
 

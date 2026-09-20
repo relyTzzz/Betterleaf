@@ -10,7 +10,7 @@ vi.mock('electron', () => ({
 
 const { AppRuleStore, targetKey } = await import('../src/main/app-rule-store.js');
 const { AppRuleEngine, stillHolding } = await import('../src/main/app-rules.js');
-const { matchProcess, parseTasklist, parsePs } = await import(
+const { matchProcess, normaliseEntry, parseTasklist, parsePs } = await import(
   '../src/main/process-watch.js'
 );
 const { DeviceRegistry } = await import('../src/main/registry.js');
@@ -26,6 +26,12 @@ type Sim = Awaited<ReturnType<typeof startSimulator>>;
 type CapturedDevice = import('../src/main/app-rule-store.js').CapturedDevice;
 type ScheduleAction = import('../src/shared/types.js').ScheduleAction;
 type ScheduleTarget = import('../src/shared/types.js').ScheduleTarget;
+type ProcessSnapshot = import('../src/main/process-watch.js').ProcessSnapshot;
+
+/** A process list holding only bare image names, as `tasklist` gives. */
+function namesOnly(...names: string[]): ProcessSnapshot {
+  return { names: new Set(names), paths: new Set() };
+}
 
 let dir: string;
 let sims: Sim[] = [];
@@ -60,22 +66,74 @@ describe('reading the process list', () => {
     const stdout =
       '"Overwatch.exe","1234","Console","1","2,345 K"\r\n' +
       '"chrome.exe","99","Console","1","10 K"\r\n';
-    expect(parseTasklist(stdout)).toEqual(new Set(['overwatch.exe', 'chrome.exe']));
+    expect(parseTasklist(stdout).names).toEqual(
+      new Set(['overwatch.exe', 'chrome.exe']),
+    );
+    // tasklist cannot give paths at all, which is why it is only the fallback.
+    expect(parseTasklist(stdout).paths.size).toBe(0);
   });
 
-  it('reduces a POSIX command path to its basename', () => {
-    expect(parsePs('/usr/bin/firefox\n/bin/zsh\n')).toEqual(new Set(['firefox', 'zsh']));
+  it('reads both the basename and the full path from ps', () => {
+    const parsed = parsePs('/usr/bin/firefox\n/bin/zsh\n');
+    expect(parsed.names).toEqual(new Set(['firefox', 'zsh']));
+    expect(parsed.paths).toEqual(new Set(['/usr/bin/firefox', '/bin/zsh']));
   });
 
   it('tolerates a name written without .exe', () => {
-    const running = new Set(['overwatch.exe']);
+    const running = namesOnly('overwatch.exe');
     expect(matchProcess(['overwatch'], running)).toBe('overwatch.exe');
     expect(matchProcess(['Overwatch.EXE'], running)).toBe('overwatch.exe');
     expect(matchProcess(['notepad'], running)).toBeUndefined();
   });
 
   it('matches when any of several names is running', () => {
-    expect(matchProcess(['steam.exe', 'vlc.exe'], new Set(['vlc.exe']))).toBe('vlc.exe');
+    expect(matchProcess(['steam.exe', 'vlc.exe'], namesOnly('vlc.exe'))).toBe('vlc.exe');
+  });
+
+  it('matches an exact path, however it was typed', () => {
+    const lol = 'c:\\riot games\\league of legends\\game\\league of legends.exe';
+    const running: ProcessSnapshot = {
+      names: new Set(['league of legends.exe']),
+      paths: new Set([lol]),
+    };
+
+    const typed = 'C:\\Riot Games\\League of Legends\\Game\\League of Legends.exe';
+    expect(matchProcess([typed], running)).toBe(lol);
+    // Forward slashes, because people type them out of habit.
+    expect(
+      matchProcess(['C:/Riot Games/League of Legends/Game/League of Legends.exe'], running),
+    ).toBe(lol);
+    // Explorer's "copy as path" wraps the whole thing in quotes.
+    expect(matchProcess([`"${typed}"`], running)).toBe(lol);
+  });
+
+  it('does not let a path match the same name running from somewhere else', () => {
+    // Precision is the entire point of writing a path out: an unrelated
+    // launcher.exe must not satisfy a rule aimed at one specific program.
+    const running: ProcessSnapshot = {
+      names: new Set(['launcher.exe']),
+      paths: new Set(['c:\\other\\launcher.exe']),
+    };
+    expect(matchProcess(['c:\\games\\mine\\launcher.exe'], running)).toBeUndefined();
+    // A bare name still matches whatever is running under that name.
+    expect(matchProcess(['launcher.exe'], running)).toBe('launcher.exe');
+  });
+
+  it('cannot match a path for a process that would not give one', () => {
+    // About half a real process list has no path, because those run at a higher
+    // integrity level than Betterleaf. A path rule simply will not match them.
+    const running = namesOnly('league of legends.exe');
+    expect(matchProcess(['c:\\riot\\league of legends.exe'], running)).toBeUndefined();
+  });
+
+  it('normalises quotes, slashes and case the same way everywhere', () => {
+    expect(normaliseEntry('  "C:/Games/A.EXE" ', 'win32')).toBe('c:\\games\\a.exe');
+  });
+
+  it('leaves POSIX separators alone', () => {
+    // A slash is the only separator POSIX has; folding it to a backslash the
+    // way Windows wants would turn every path into nonsense.
+    expect(normaliseEntry('/usr/bin/Firefox', 'linux')).toBe('/usr/bin/firefox');
   });
 });
 
@@ -122,7 +180,7 @@ describe('the rule engine', () => {
 
     const engine = new AppRuleEngine(
       store,
-      async () => running,
+      async () => ({ names: running, paths: new Set<string>() }),
       {
         serialsFor: (target) =>
           target.kind === 'device' ? [target.serialNo] : ['A', 'B'],
@@ -323,7 +381,7 @@ describe('the rule engine', () => {
       store,
       async () => {
         listCalls++;
-        return new Set<string>();
+        return namesOnly();
       },
       {
         serialsFor: () => ['A'],
@@ -394,7 +452,7 @@ describe('app rules against devices', () => {
       { tickMs: 3_600_000 },
       new LockStore(path.join(dir, 'locks.json')),
       new AppRuleStore(path.join(dir, 'app-rules.json')),
-      async () => running,
+      async () => ({ names: running, paths: new Set<string>() }),
       { pollMs: 3_600_000 },
     );
     await registry.start();

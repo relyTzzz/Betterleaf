@@ -38,7 +38,7 @@ Concretely, four things carry that weight. Don't undo them without a reason:
 
 ## Testing
 
-`pnpm test` runs 221 tests against `tools/simulator` — no hardware required.
+`pnpm test` runs 227 tests against `tools/simulator` — no hardware required.
 
 - The simulator emulates the awkward parts on purpose: 401 before pairing, an
   empty extControl body on Canvas, a Rhythm pseudo-panel in the NL22 layout,
@@ -128,12 +128,28 @@ small ops interface so it is testable without devices or a real process list.
   Win32 calls, which would mean a native addon or spawning PowerShell every few
   seconds. Both cost far more than the question is worth. An app that sits in the
   tray all day is therefore a poor choice for a rule, and the UI says so.
-- **Enumerating processes is expensive.** `tasklist` measures at roughly **550ms**
-  per run on a normal desktop — not the "few milliseconds" it is easy to assume.
-  So: the poll is 10s, and `evaluate()` **skips the listing entirely** when no
-  enabled rule names a program and nothing is being held. An install with no
-  rules pays nothing. `refreshProcesses()` is the deliberate way to list anyway,
-  for the editor's suggestions.
+- **A rule entry is a bare name or a full path.** A name matches wherever the
+  program runs from; a path matches only that exact executable, which is what
+  you want when the name alone is ambiguous — several launchers are
+  `launcher.exe` and every Java game is `javaw.exe`. Entries are normalised
+  (quotes stripped, case folded, and on Windows only, slashes folded to
+  backslashes) so what someone types compares equal to what the system reports.
+  A path entry is *never* matched against names: that precision is the point.
+- **Paths come from PowerShell, not `wmic`.** `wmic` has been removed from
+  Windows 11 (verified missing on 26200). `Get-CimInstance Win32_Process`
+  measures ~680ms against ~690ms for a bare `tasklist` on the same machine, so
+  paths cost nothing extra and there is one code path, not two. `tasklist` is
+  kept only as a names-only fallback for machines that refuse to run PowerShell.
+- **Only about half of a process list has a path.** Windows refuses the path of
+  anything running at a higher integrity level — 56 of 98 on a normal desktop.
+  Those can still be matched by name, and the editor's picker labels them.
+- **Enumerating processes is expensive** either way: roughly half a second per
+  run, not the "few milliseconds" it is easy to assume. So the poll is 10s, and
+  `evaluate()` **skips the listing entirely** when no enabled rule names a
+  program and nothing is being held. An install with no rules pays nothing.
+  `refreshProcesses()` is the deliberate way to list anyway, for the editor.
+- `normaliseEntry` takes the platform as an optional second argument. Do not
+  pass it to `.map` by reference — `map` fills that argument with the index.
 - **Edge-triggered, never continuously enforced.** The engine acts when the
   winning rule changes and otherwise leaves the lights alone. Re-applying every
   poll would fight anyone adjusting a light by hand while the program was open.

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { app } from 'electron';
+import { normaliseEntry } from './process-watch.js';
 import type { AppRule, AppRuleInput, ScheduleAction } from '../shared/types.js';
 
 /**
@@ -59,14 +60,23 @@ function cleanTarget(value: unknown): AppRule['target'] | undefined {
   return undefined;
 }
 
-/** Lowercased, trimmed, de-duplicated, empties dropped. */
+/**
+ * Normalised, de-duplicated, empties dropped.
+ *
+ * Entries may be a bare image name or a full path. Both go through the same
+ * normalisation the matcher uses, so a path pasted from Explorer with its
+ * surrounding quotes, or typed with forward slashes, still compares equal to
+ * what Windows reports.
+ */
 export function cleanProcessNames(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return [
     ...new Set(
       value
         .filter((n): n is string => typeof n === 'string')
-        .map((n) => n.trim().toLowerCase())
+        // Wrapped, not passed by reference: `normaliseEntry` takes an optional
+        // platform as its second argument, which `map` would fill with the index.
+        .map((n) => normaliseEntry(n))
         .filter(Boolean),
     ),
   ];

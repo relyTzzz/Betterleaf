@@ -245,6 +245,13 @@ export interface AppRuleView extends AppRule {
 export interface RunningApp {
   /** Executable name, lowercased. */
   processName: string;
+  /**
+   * Full path, lowercased, when Windows would tell us.
+   *
+   * Absent for processes running at a higher integrity level than Betterleaf,
+   * which is most system processes and anything started as administrator.
+   */
+  path?: string;
 }
 
 /**

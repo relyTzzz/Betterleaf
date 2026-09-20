@@ -20,6 +20,22 @@ function effectsFor(snapshot: AppSnapshot, target: ScheduleTarget): string[] {
   return snapshot.rooms.find((r) => r.id === target.roomId)?.effects ?? [];
 }
 
+/**
+ * Tidy one line of the programs box.
+ *
+ * Only trims, unquotes and lowercases. Slash direction is deliberately left
+ * alone here: that depends on the platform, which the renderer has no business
+ * knowing, and the main process normalises everything again before storing it.
+ */
+function tidyEntry(raw: string): string {
+  return raw.trim().replace(/^["']|["']$/g, '').toLowerCase();
+}
+
+/** A full path rather than a bare image name. */
+function looksLikePath(entry: string): boolean {
+  return entry.includes('\\') || entry.includes('/') || /^[a-z]:/.test(entry);
+}
+
 function blankRule(snapshot: AppSnapshot): AppRuleInput | undefined {
   const target: ScheduleTarget | undefined = snapshot.rooms[0]
     ? { kind: 'room', roomId: snapshot.rooms[0].id }
@@ -136,6 +152,22 @@ export function AppRulesView() {
   );
 }
 
+/** Long paths are shown tail-first, because the executable is the useful end. */
+function ProgramList({ entries }: { entries: string[] }) {
+  return (
+    <>
+      {entries.map((entry, i) => (
+        <span key={entry}>
+          {i > 0 && ', '}
+          <span title={entry} className={looksLikePath(entry) ? 'path-entry' : undefined}>
+            {looksLikePath(entry) ? (entry.split(/[\\/]/).pop() ?? entry) : entry}
+          </span>
+        </span>
+      ))}
+    </>
+  );
+}
+
 function RuleRow({
   rule,
   first,
@@ -196,8 +228,7 @@ function RuleRow({
         <div className="schedule-meta faint">
           {rule.processNames.length > 0 ? (
             <>
-              When running: {rule.processNames.join(', ')}
-              {rule.matchedProcess && ` · matched ${rule.matchedProcess}`}
+              When running: <ProgramList entries={rule.processNames} />
             </>
           ) : (
             <span className="warn">No programs listed — this rule never matches</span>
@@ -225,6 +256,11 @@ function RuleRow({
   );
 }
 
+const PLACEHOLDER = [
+  'league of legends.exe',
+  'C:\\Riot Games\\League of Legends\\Game\\League of Legends.exe',
+].join('\n');
+
 function RuleEditor({
   id,
   draft,
@@ -241,7 +277,8 @@ function RuleEditor({
   const soundReactive = snapshot.soundReactiveEffects;
   const effects = useMemo(() => effectsFor(snapshot, draft.target), [snapshot, draft.target]);
   const [running, setRunning] = useState<RunningApp[]>([]);
-  const [namesText, setNamesText] = useState(draft.processNames.join(', '));
+  const [namesText, setNamesText] = useState(draft.processNames.join('\n'));
+  const [filter, setFilter] = useState('');
 
   // The running list is a convenience, not a gate: a program you want a rule
   // for might not be open while you are writing the rule.
@@ -250,15 +287,18 @@ function RuleEditor({
   }, []);
 
   const turningOff = draft.action.power === false;
-  const names = namesText
-    .split(',')
-    .map((n) => n.trim().toLowerCase())
-    .filter(Boolean);
+
+  // One per line rather than comma-separated: a Windows path may legally
+  // contain a comma, so splitting on one would cut a pasted path in half.
+  const names = namesText.split('\n').map(tidyEntry).filter(Boolean);
   const noNames = names.length === 0;
   const emptyAction =
     draft.action.power === undefined &&
     draft.action.effect === undefined &&
     draft.action.brightness === undefined;
+
+  const addEntry = (entry: string) =>
+    setNamesText((prev) => [prev.trim(), entry].filter(Boolean).join('\n'));
 
   const setAction = (patch: Partial<ScheduleAction>) => {
     const action: ScheduleAction = { ...draft.action, ...patch };
@@ -272,6 +312,14 @@ function RuleEditor({
     draft.target.kind === 'room'
       ? `room:${draft.target.roomId}`
       : `device:${draft.target.serialNo}`;
+
+  const shown = filter
+    ? running.filter(
+        (a) =>
+          a.processName.includes(filter.toLowerCase()) ||
+          a.path?.includes(filter.toLowerCase()),
+      )
+    : running;
 
   const save = async () => {
     if (noNames || emptyAction) return;
@@ -297,26 +345,52 @@ function RuleEditor({
           />
         </label>
 
-        <label className="field">
+        <div className="field">
           <span>Programs</span>
-          <input
-            type="text"
-            list="running-apps"
-            placeholder="overwatch.exe, steam.exe"
+          <textarea
+            className="process-list"
+            rows={3}
+            spellCheck={false}
+            placeholder={PLACEHOLDER}
             value={namesText}
             onChange={(e) => setNamesText(e.target.value)}
           />
-          <datalist id="running-apps">
-            {running.map((app) => (
-              <option key={app.processName} value={app.processName} />
-            ))}
-          </datalist>
           <p className="hint">
-            Separate several with commas — the rule matches when any of them is
-            running. {running.length > 0 && `${running.length} programs are open now; `}
-            the box suggests from them as you type.
+            One per line — the rule matches when any of them is running. A bare
+            name like <code>vlc.exe</code> matches wherever it runs from; a full
+            path matches only that exact program, which is what you want when the
+            name alone is ambiguous. Several launchers are <code>launcher.exe</code>,
+            and every Java game is <code>javaw.exe</code>.
           </p>
-        </label>
+
+          {running.length > 0 && (
+            <details className="running-picker">
+              <summary>Pick from {running.length} running programs</summary>
+              <input
+                type="text"
+                className="running-filter"
+                placeholder="Filter…"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+              />
+              <div className="running-list">
+                {shown.map((app) => (
+                  <button
+                    key={app.path ?? app.processName}
+                    type="button"
+                    className="ghost"
+                    title={app.path ?? 'Windows would not give a path for this one'}
+                    onClick={() => addEntry(app.path ?? app.processName)}
+                  >
+                    {app.processName}
+                    {!app.path && <span className="no-path">name only</span>}
+                  </button>
+                ))}
+                {shown.length === 0 && <span className="hint">Nothing matches.</span>}
+              </div>
+            </details>
+          )}
+        </div>
 
         <label className="field">
           <span>Applies to</span>
