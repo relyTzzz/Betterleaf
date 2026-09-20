@@ -25,6 +25,17 @@ const api: BetterleafApi = {
     ipcRenderer.invoke(IPC.setRoomBrightness, roomId, value),
   setRoomEffect: (roomId, name) => ipcRenderer.invoke(IPC.setRoomEffect, roomId, name),
 
+  createSchedule: (input) => ipcRenderer.invoke(IPC.createSchedule, input),
+  updateSchedule: (id, input) => ipcRenderer.invoke(IPC.updateSchedule, id, input),
+  deleteSchedule: (id) => ipcRenderer.invoke(IPC.deleteSchedule, id),
+  setScheduleEnabled: (id, enabled) =>
+    ipcRenderer.invoke(IPC.setScheduleEnabled, id, enabled),
+  runScheduleNow: (id) => ipcRenderer.invoke(IPC.runScheduleNow, id),
+
+  setTrayEnabled: (enabled) => ipcRenderer.invoke(IPC.setTrayEnabled, enabled),
+  setStartWithWindows: (enabled) =>
+    ipcRenderer.invoke(IPC.setStartWithWindows, enabled),
+
   listLibrary: () => ipcRenderer.invoke(IPC.listLibrary),
   refreshLibrary: () => ipcRenderer.invoke(IPC.refreshLibrary),
   applyLibraryEffect: (name, serialNo) =>

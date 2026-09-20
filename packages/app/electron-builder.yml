@@ -14,6 +14,15 @@ files:
   - out/**
   - package.json
 
+# The window icon is embedded in the exe by electron-builder, but the tray needs
+# a real file it can load at runtime, and asar-packed paths are not one. Shipping
+# it unpacked beside the app is the least fragile way to have a tray icon that is
+# actually visible — an invisible one would mean a running app with no way back
+# to its window.
+extraResources:
+  - from: build/icon.ico
+    to: icon.ico
+
 asar: true
 
 win:

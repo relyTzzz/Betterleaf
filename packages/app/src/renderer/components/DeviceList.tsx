@@ -104,13 +104,24 @@ export function DeviceList({ onPair }: { onPair: (device: UnpairedDeviceView) =>
         ))}
 
       {snapshot.devices.length > 0 && (
-        <button
-          className={`library-link${selection?.kind === 'library' ? ' selected' : ''}`}
-          onClick={() => select({ kind: 'library' })}
-        >
-          <span>Library</span>
-          <span className="room-count">{snapshot.libraryCount}</span>
-        </button>
+        <>
+          <button
+            className={`library-link${selection?.kind === 'library' ? ' selected' : ''}`}
+            onClick={() => select({ kind: 'library' })}
+          >
+            <span>Library</span>
+            <span className="room-count">{snapshot.libraryCount}</span>
+          </button>
+          <button
+            className={`library-link${selection?.kind === 'schedules' ? ' selected' : ''}`}
+            onClick={() => select({ kind: 'schedules' })}
+          >
+            <span>Schedules</span>
+            <span className="room-count">
+              {snapshot.schedules.filter((s) => s.enabled).length}
+            </span>
+          </button>
+        </>
       )}
 
       {snapshot.unpaired.length > 0 && (

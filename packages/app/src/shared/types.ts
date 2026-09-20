@@ -103,6 +103,86 @@ export interface RoomView {
 }
 
 /**
+ * What a schedule points at.
+ *
+ * A room rather than a list of devices, so a schedule follows the room's
+ * membership: add a light to "Office" and the 7am schedule covers it without
+ * being edited.
+ */
+export type ScheduleTarget =
+  | { kind: 'device'; serialNo: string }
+  | { kind: 'room'; roomId: string };
+
+/**
+ * What a schedule does when it fires.
+ *
+ * Every field is optional and only the ones present are applied, so a schedule
+ * can dim without disturbing the scene, or change scene without touching
+ * brightness. All three absent is a schedule that does nothing, which the
+ * editor refuses to save.
+ */
+export interface ScheduleAction {
+  /** Turn the lights on or off. Omitted leaves power alone. */
+  power?: boolean;
+  /** Scene to select, by name. */
+  effect?: string;
+  /** 0–100. */
+  brightness?: number;
+}
+
+export interface Schedule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  target: ScheduleTarget;
+  /** Minutes past local midnight, 0–1439. Local time, so DST is handled by it. */
+  timeMinutes: number;
+  /** Days it runs on: 0 = Sunday, matching `Date#getDay`. Empty never fires. */
+  days: number[];
+  action: ScheduleAction;
+  order: number;
+  /**
+   * When this last fired, as the epoch ms of the *slot* rather than of the
+   * actual write. Persisted, so restarting the app cannot re-fire a schedule
+   * that already ran, and so a slot is never claimed twice.
+   */
+  lastRunAt?: number;
+  /** 'ok', 'missed', or the error that stopped it. */
+  lastResult?: string;
+}
+
+/** A schedule plus what only the main process can work out. */
+export interface ScheduleView extends Schedule {
+  /** The room or device name, or undefined when the target is gone. */
+  targetName?: string;
+  /** Epoch ms of the next firing; undefined when it will never fire. */
+  nextRunAt?: number;
+}
+
+/** Fields the editor can set. The rest are managed by the store. */
+export type ScheduleInput = Omit<
+  Schedule,
+  'id' | 'order' | 'lastRunAt' | 'lastResult'
+>;
+
+/**
+ * Whether Betterleaf keeps running when the window is closed.
+ *
+ * Schedules only fire while the app is running, so this is load-bearing rather
+ * than a convenience, and the UI says as much.
+ */
+export interface AppSettings {
+  /** True when closing the window hides to the tray instead of quitting. */
+  trayEnabled: boolean;
+  startWithWindows: boolean;
+  /**
+   * False in development, where the login item would point at electron.exe
+   * rather than at Betterleaf. The UI greys the toggle out and explains why.
+   */
+  startWithWindowsSupported: boolean;
+}
+
+/**
  * An archived effect, as the renderer sees it.
  *
  * `onDevices` is computed live from the devices themselves rather than stored:
@@ -182,6 +262,8 @@ export interface AppSnapshot {
    */
   soundReactiveEffects: string[];
   rooms: RoomView[];
+  schedules: ScheduleView[];
+  settings: AppSettings;
   unpaired: UnpairedDeviceView[];
   discovery: DiscoveryState;
 }
@@ -215,6 +297,16 @@ export interface BetterleafApi {
   setRoomPower(roomId: string, on: boolean): Promise<void>;
   setRoomBrightness(roomId: string, value: number): Promise<void>;
   setRoomEffect(roomId: string, name: string): Promise<void>;
+
+  createSchedule(input: ScheduleInput): Promise<string>;
+  updateSchedule(id: string, input: ScheduleInput): Promise<void>;
+  deleteSchedule(id: string): Promise<void>;
+  setScheduleEnabled(id: string, enabled: boolean): Promise<void>;
+  /** Apply a schedule's action now, without waiting for its time or changing it. */
+  runScheduleNow(id: string): Promise<{ ok: boolean; error?: string }>;
+
+  setTrayEnabled(enabled: boolean): Promise<void>;
+  setStartWithWindows(enabled: boolean): Promise<void>;
 
   listLibrary(): Promise<LibraryEntryView[]>;
   refreshLibrary(): Promise<void>;
@@ -256,6 +348,13 @@ export const IPC = {
   setRoomPower: 'betterleaf:setRoomPower',
   setRoomBrightness: 'betterleaf:setRoomBrightness',
   setRoomEffect: 'betterleaf:setRoomEffect',
+  createSchedule: 'betterleaf:createSchedule',
+  updateSchedule: 'betterleaf:updateSchedule',
+  deleteSchedule: 'betterleaf:deleteSchedule',
+  setScheduleEnabled: 'betterleaf:setScheduleEnabled',
+  runScheduleNow: 'betterleaf:runScheduleNow',
+  setTrayEnabled: 'betterleaf:setTrayEnabled',
+  setStartWithWindows: 'betterleaf:setStartWithWindows',
   listLibrary: 'betterleaf:listLibrary',
   refreshLibrary: 'betterleaf:refreshLibrary',
   applyLibraryEffect: 'betterleaf:applyLibraryEffect',

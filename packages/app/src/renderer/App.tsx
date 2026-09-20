@@ -4,6 +4,7 @@ import { DeviceList } from './components/DeviceList.js';
 import { LibraryView } from './components/LibraryView.js';
 import { PairDialog } from './components/PairDialog.js';
 import { RoomDetail } from './components/RoomDetail.js';
+import { SchedulesView } from './components/SchedulesView.js';
 import {
   api,
   useApp,
@@ -20,6 +21,7 @@ export function App() {
   const device = useSelectedDevice();
   const room = useSelectedRoom();
   const showLibrary = useApp((s) => s.selection?.kind === 'library');
+  const showSchedules = useApp((s) => s.selection?.kind === 'schedules');
   const [pairing, setPairing] = useState<{ device?: UnpairedDeviceView } | undefined>();
 
   const { scanning, rung } = snapshot.discovery;
@@ -44,6 +46,8 @@ export function App() {
 
       {showLibrary ? (
         <LibraryView />
+      ) : showSchedules ? (
+        <SchedulesView />
       ) : room ? (
         <RoomDetail room={room} />
       ) : device ? (

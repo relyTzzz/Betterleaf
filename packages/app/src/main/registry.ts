@@ -14,6 +14,7 @@ import {
   type ProbeResult,
 } from '@betterleaf/protocol';
 import type {
+  AppSettings,
   AppSnapshot,
   DeviceView,
   DiscoveryState,
@@ -23,6 +24,11 @@ import type {
   PairResult,
   Room,
   RoomView,
+  Schedule,
+  ScheduleAction,
+  ScheduleInput,
+  ScheduleTarget,
+  ScheduleView,
   UnpairedDeviceView,
 } from '../shared/types.js';
 import {
@@ -35,6 +41,8 @@ import {
 import { EffectHarvester } from './effects/harvester.js';
 import { EffectLibrary, effectHash } from './effects/library.js';
 import { RoomStore } from './room-store.js';
+import { ScheduleStore } from './schedule-store.js';
+import { Scheduler, nextOccurrence, type SchedulerOptions } from './scheduler.js';
 import { DeviceStore } from './store.js';
 
 /**
@@ -69,6 +77,8 @@ type RegistryEvents = {
 export class DeviceRegistry extends EventEmitter<RegistryEvents> {
   readonly #store: DeviceStore;
   readonly #rooms: RoomStore;
+  readonly #schedules: ScheduleStore;
+  readonly #scheduler: Scheduler;
   readonly #library: EffectLibrary;
   readonly #harvester: EffectHarvester;
   readonly #devices = new Map<string, NanoleafDevice>();
@@ -82,6 +92,20 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
    * so disk and memory cannot drift apart.
    */
   #roomList: Room[] = [];
+
+  /** Same idea for schedules: the snapshot is built synchronously. */
+  #scheduleList: Schedule[] = [];
+
+  /**
+   * Owned by the main process, not by this class — whether the app keeps running
+   * in the tray is an Electron question. Carried here only so it can ride along
+   * in the snapshot the renderer already subscribes to.
+   */
+  #settings: AppSettings = {
+    trayEnabled: true,
+    startWithWindows: false,
+    startWithWindowsSupported: false,
+  };
 
   /**
    * Which discovery rungs to use. Exists so a user on a network where a subnet
@@ -102,6 +126,8 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     > = {},
     library = new EffectLibrary(),
     harvester?: EffectHarvester,
+    schedules = new ScheduleStore(),
+    schedulerOptions: SchedulerOptions = {},
   ) {
     super();
     this.#store = store;
@@ -109,6 +135,16 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     this.#discoveryOptions = discoveryOptions;
     this.#library = library;
     this.#harvester = harvester ?? new EffectHarvester(library);
+    this.#schedules = schedules;
+    this.#scheduler = new Scheduler(
+      schedules,
+      (target, action) => this.#applySchedule(target, action),
+      schedulerOptions,
+    );
+
+    // A firing changes `lastRunAt`/`lastResult` and the next due time, all of
+    // which the schedules view shows.
+    this.#scheduler.on('changed', () => void this.#refreshSchedules());
 
     // A harvest means the archive grew. The count is part of every snapshot, so
     // it has to be recomputed here — waiting until someone opens the library
@@ -132,7 +168,9 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
   async start(): Promise<void> {
     const known = await this.#store.load();
     this.#roomList = await this.#rooms.load();
+    this.#scheduleList = await this.#schedules.load();
     await this.#refreshLibrarySummaryQuietly();
+    this.#scheduler.start();
     await this.scan(known);
   }
 
@@ -269,9 +307,12 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
       this.#devices.delete(serialNo);
     }
     await this.#store.remove(serialNo);
-    // A forgotten device must not linger as a phantom member of a room.
+    // A forgotten device must not linger as a phantom member of a room, nor as
+    // the target of a schedule that can now never do anything.
     await this.#rooms.pruneDevice(serialNo);
+    await this.#schedules.pruneDevice(serialNo);
     this.#roomList = await this.#rooms.load();
+    this.#scheduleList = await this.#schedules.load();
     this.#publish();
   }
 
@@ -474,6 +515,9 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
 
   async deleteRoom(roomId: string): Promise<void> {
     await this.#rooms.remove(roomId);
+    // Same reasoning as forgetting a device: no schedule may outlive its target.
+    await this.#schedules.pruneRoom(roomId);
+    this.#scheduleList = await this.#schedules.load();
     await this.#refreshRooms();
   }
 
@@ -533,6 +577,107 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     return this.#fanOut(roomId, async (d) => {
       if (d.effects.includes(name)) await d.selectEffect(name);
     });
+  }
+
+  // --- schedules -------------------------------------------------------------
+
+  async createSchedule(input: ScheduleInput): Promise<string> {
+    const schedule = await this.#schedules.create(input);
+    await this.#refreshSchedules();
+    return schedule.id;
+  }
+
+  async updateSchedule(id: string, input: ScheduleInput): Promise<void> {
+    await this.#schedules.update(id, input);
+    await this.#refreshSchedules();
+  }
+
+  async deleteSchedule(id: string): Promise<void> {
+    await this.#schedules.remove(id);
+    await this.#refreshSchedules();
+  }
+
+  async setScheduleEnabled(id: string, enabled: boolean): Promise<void> {
+    await this.#schedules.setEnabled(id, enabled);
+    await this.#refreshSchedules();
+  }
+
+  /** Run a schedule's action now, to check it does what you meant. */
+  runScheduleNow(id: string): Promise<{ ok: boolean; error?: string }> {
+    return this.#scheduler.runNow(id);
+  }
+
+  /** Let the main process tell the renderer how the app is set to run. */
+  setSettings(settings: AppSettings): void {
+    this.#settings = settings;
+    this.#publish();
+  }
+
+  async #refreshSchedules(): Promise<void> {
+    this.#scheduleList = await this.#schedules.load();
+    this.#publish();
+  }
+
+  /**
+   * Carry out a schedule's action.
+   *
+   * Throws rather than swallowing, so the schedule records why it did not do
+   * what it said. A schedule that quietly failed at 7am and still reads "ok" is
+   * worse than no schedule.
+   *
+   * Power comes first: a scene selected while the lights are off is not what
+   * anyone means by "Nemo at sunset". Turning *off* stops there, since dimming
+   * and re-scening something on its way out is pointless traffic.
+   */
+  async #applySchedule(target: ScheduleTarget, action: ScheduleAction): Promise<void> {
+    if (target.kind === 'device') {
+      const device = this.#devices.get(target.serialNo);
+      if (!device) throw new Error('That light is not connected.');
+      await this.#applyToDevice(device, action);
+      return;
+    }
+
+    const members = this.#membersOf(target.roomId);
+    if (members.length === 0) {
+      throw new Error('No lights in that room are connected.');
+    }
+
+    // allSettled, not all: one unreachable light must not stop the rest of the
+    // room from doing what was asked.
+    const results = await Promise.allSettled(
+      members.map((device) => this.#applyToDevice(device, action)),
+    );
+    const failures = results.flatMap((r, i) =>
+      r.status === 'rejected'
+        ? [`${members[i]?.name ?? 'a light'}: ${(r.reason as Error).message}`]
+        : [],
+    );
+    if (failures.length === 0) return;
+
+    // Partial success is still a failure to do what the schedule said, and is
+    // reported as one — with which lights, so it is actionable.
+    throw new Error(
+      failures.length === members.length
+        ? failures.join('; ')
+        : `Applied to ${members.length - failures.length} of ${members.length} lights — ${failures.join('; ')}`,
+    );
+  }
+
+  async #applyToDevice(device: NanoleafDevice, action: ScheduleAction): Promise<void> {
+    if (action.power === false) {
+      await device.setPower(false);
+      return;
+    }
+    if (action.power === true) await device.setPower(true);
+
+    if (action.effect !== undefined) {
+      if (!device.effects.includes(action.effect)) {
+        throw new Error(`does not have the scene "${action.effect}"`);
+      }
+      await device.selectEffect(action.effect);
+    }
+
+    if (action.brightness !== undefined) await device.setBrightness(action.brightness);
   }
 
   // --- pairing ---------------------------------------------------------------
@@ -604,9 +749,32 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
       libraryCount: this.#libraryCount,
       soundReactiveEffects: this.#soundReactiveNames,
       rooms: this.#roomList.map((room) => this.#toRoomView(room)),
+      schedules: this.#scheduleList.map((schedule) => this.#toScheduleView(schedule)),
+      settings: this.#settings,
       unpaired: this.#unpaired,
       discovery: this.#discovery,
     };
+  }
+
+  #toScheduleView(schedule: Schedule): ScheduleView {
+    const view: ScheduleView = { ...schedule };
+
+    // Resolved live, not stored: a renamed room must not leave the schedules
+    // view naming the old one.
+    // Bound to a local first because narrowing on `schedule.target` does not
+    // survive into the `find` callback below.
+    const target = schedule.target;
+    const name =
+      target.kind === 'device'
+        ? this.#devices.get(target.serialNo)?.name
+        : this.#roomList.find((r) => r.id === target.roomId)?.name;
+    if (name !== undefined) view.targetName = name;
+
+    if (schedule.enabled) {
+      const next = nextOccurrence(schedule, Date.now());
+      if (next !== undefined) view.nextRunAt = next;
+    }
+    return view;
   }
 
   #toRoomView(room: Room): RoomView {
@@ -654,6 +822,7 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
 
   async dispose(): Promise<void> {
     this.#pairAbort?.abort();
+    this.#scheduler.stop();
     this.#harvester.stop();
     await Promise.all([...this.#devices.values()].map((d) => d.close()));
     this.#devices.clear();

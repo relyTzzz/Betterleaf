@@ -38,7 +38,7 @@ Concretely, four things carry that weight. Don't undo them without a reason:
 
 ## Testing
 
-`pnpm test` runs 87 tests against `tools/simulator` — no hardware required.
+`pnpm test` runs 178 tests against `tools/simulator` — no hardware required.
 
 - The simulator emulates the awkward parts on purpose: 401 before pairing, an
   empty extControl body on Canvas, a Rhythm pseudo-panel in the NL22 layout,
@@ -51,6 +51,50 @@ Concretely, four things carry that weight. Don't undo them without a reason:
   discovery test starts failing intermittently, check for a stray `pnpm sim`.
 - The frame encoder tests are pinned to byte-exact example packets from
   Nanoleaf's own documentation. If one fails, the encoder is wrong, not the test.
+
+## Schedules
+
+Schedules are a Betterleaf concept and run **in the app**, not on the lights.
+
+That is forced by the hardware, not chosen. Checked against both devices:
+
+- **NL22 Light Panels (fw 5.3.2)** has a `schedules` block in its info document
+  and answers `GET /schedules` with `{"schedules":[]}`.
+- **NL29 Canvas (fw 12.4.1)** 404s on every schedule path and has no such field.
+  The newer firmware dropped device-side scheduling; Nanoleaf moved it to the
+  cloud.
+
+So device-native schedules would work on one of the two models and could not
+express a room schedule at all. Pushing schedules down to the NL22 as a bonus is
+possible later, but the app-side engine has to exist either way.
+
+Consequences that the code depends on:
+
+- **`setInterval` tick, never one long `setTimeout` per schedule.** An eight-hour
+  timer does not survive the machine sleeping, and a lid closing is the normal
+  case. Ticking also notices clock, timezone and DST changes within one tick.
+- **Slots, not wall-clock instants.** A schedule records `lastRunAt` as the epoch
+  ms of the *slot* it fired for. Comparing against the slot is what makes firing
+  idempotent across restarts — the app reopening at 07:00:05 must not re-fire
+  07:00.
+- **Late is not the same as due.** Past `graceMs` (2 min) a slot is recorded as
+  `missed` and skipped. Turning the lights on four hours late because the PC was
+  asleep is the wrong answer, not a late right one.
+- **Slots are built from local date components**, never by subtracting 24 hours,
+  so "07:00" stays 07:00 across a DST boundary.
+- **Single instance lock is load-bearing.** Two copies would each fire every
+  schedule and race on `schedules.json`.
+- **Closing the window hides to the tray.** Schedules stop when the app stops, so
+  "close" must not silently mean "cancel every schedule". Quitting is explicit,
+  from the tray menu.
+- A firing that fails **still claims its slot**, and records why. Retrying every
+  20 seconds against a light that is not there is the storm avoided everywhere
+  else in this codebase.
+
+The timing rules live in `main/scheduler.ts`, which deliberately knows nothing
+about devices, rooms or Electron — it decides *when* and hands the *what* to an
+apply function. That is what makes the easy-to-get-subtly-wrong part testable
+without hardware.
 
 ## Things that have already bitten
 

@@ -1,7 +1,8 @@
 import { join } from 'node:path';
-import { BrowserWindow, Menu, app, ipcMain, shell } from 'electron';
-import { IPC } from '../shared/types.js';
+import { BrowserWindow, Menu, Tray, app, ipcMain, nativeImage, shell } from 'electron';
+import { IPC, type AppSettings, type ScheduleInput } from '../shared/types.js';
 import { DeviceRegistry } from './registry.js';
+import { SettingsStore } from './settings-store.js';
 
 // Before anything reads app.getPath('userData'): the package name is scoped
 // (@betterleaf/app), which would otherwise become the directory name on disk.
@@ -18,7 +19,94 @@ app.setName('Betterleaf');
 Menu.setApplicationMenu(null);
 
 const registry = new DeviceRegistry();
+const settingsStore = new SettingsStore();
 let window: BrowserWindow | undefined;
+let tray: Tray | undefined;
+
+/**
+ * Set once the user has actually asked to quit, so `close` can tell the two
+ * cases apart: closing the window should hide to the tray, quitting should not.
+ */
+let quitting = false;
+
+/** Mirrors the store, plus the login-item state Electron owns. */
+let settings: AppSettings = {
+  trayEnabled: true,
+  startWithWindows: false,
+  // Only meaningful once packaged: in development the login item would point at
+  // electron.exe and a stray dev build, not at Betterleaf.
+  startWithWindowsSupported: app.isPackaged && process.platform === 'win32',
+};
+
+/**
+ * Only one Betterleaf at a time.
+ *
+ * Load-bearing now that schedules exist: two copies running would each fire
+ * every schedule, so the lights would get two of everything and the two
+ * processes would race each other writing `schedules.json`.
+ */
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => showWindow());
+}
+
+/** The tray icon, which is the app icon at whatever size the platform wants. */
+function trayImage() {
+  const file = app.isPackaged
+    ? join(process.resourcesPath, 'icon.ico')
+    : join(__dirname, '../../build/icon.ico');
+  const image = nativeImage.createFromPath(file);
+  // An empty image gives an invisible tray entry, which is worse than none:
+  // the app would be running with no way to get back to it.
+  return image.isEmpty() ? undefined : image;
+}
+
+function buildTray(): void {
+  if (tray || !settings.trayEnabled) return;
+  const image = trayImage();
+  if (!image) return;
+
+  tray = new Tray(image);
+  tray.setToolTip('Betterleaf');
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: 'Open Betterleaf', click: () => showWindow() },
+      { type: 'separator' },
+      {
+        label: 'Quit',
+        click: () => {
+          quitting = true;
+          app.quit();
+        },
+      },
+    ]),
+  );
+  tray.on('click', () => showWindow());
+}
+
+function destroyTray(): void {
+  tray?.destroy();
+  tray = undefined;
+}
+
+function showWindow(): void {
+  if (!window || window.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+
+function applySettings(next: AppSettings): void {
+  settings = next;
+  if (settings.trayEnabled) buildTray();
+  else destroyTray();
+  registry.setSettings(settings);
+}
 
 function createWindow(): void {
   window = new BrowserWindow({
@@ -39,7 +127,21 @@ function createWindow(): void {
     },
   });
 
-  window.on('ready-to-show', () => window?.show());
+  // Launched by the login item: come up in the tray rather than throwing a
+  // window in your face every time you sign in.
+  const startHidden = process.argv.includes('--hidden');
+  window.on('ready-to-show', () => {
+    if (!startHidden) window?.show();
+  });
+
+  // Closing the window keeps the app alive in the tray, because schedules only
+  // fire while it is running. Without this, "close" would silently mean "cancel
+  // every schedule", which is not what closing a window looks like it does.
+  window.on('close', (event) => {
+    if (quitting || !settings.trayEnabled) return;
+    event.preventDefault();
+    window?.hide();
+  });
 
   // Removing the menu also removes its accelerators, so put the one that
   // actually matters back — but only in development, where it is wanted.
@@ -86,6 +188,36 @@ function registerIpc(): void {
   ipcMain.handle(IPC.setRoomEffect, (_e, id: string, name: string) =>
     registry.setRoomEffect(id, name),
   );
+
+  ipcMain.handle(IPC.createSchedule, (_e, input: ScheduleInput) =>
+    registry.createSchedule(input),
+  );
+  ipcMain.handle(IPC.updateSchedule, (_e, id: string, input: ScheduleInput) =>
+    registry.updateSchedule(id, input),
+  );
+  ipcMain.handle(IPC.deleteSchedule, (_e, id: string) => registry.deleteSchedule(id));
+  ipcMain.handle(IPC.setScheduleEnabled, (_e, id: string, enabled: boolean) =>
+    registry.setScheduleEnabled(id, enabled),
+  );
+  ipcMain.handle(IPC.runScheduleNow, (_e, id: string) => registry.runScheduleNow(id));
+
+  ipcMain.handle(IPC.setTrayEnabled, async (_e, enabled: boolean) => {
+    await settingsStore.save({ trayEnabled: enabled });
+    applySettings({ ...settings, trayEnabled: enabled });
+  });
+
+  ipcMain.handle(IPC.setStartWithWindows, (_e, enabled: boolean) => {
+    if (!settings.startWithWindowsSupported) return;
+    // `--hidden` so signing in does not open a window; Betterleaf just starts
+    // sitting in the tray, ready for whatever the first schedule is.
+    app.setLoginItemSettings({ openAtLogin: enabled, args: ['--hidden'] });
+    applySettings({
+      ...settings,
+      // Read back rather than assume: if Windows refused, the toggle should
+      // show what is actually true.
+      startWithWindows: app.getLoginItemSettings().openAtLogin,
+    });
+  });
 
   ipcMain.handle(IPC.listLibrary, () => registry.listLibrary());
   ipcMain.handle(IPC.refreshLibrary, () => registry.refreshLibrary());
@@ -149,7 +281,16 @@ function registerIpc(): void {
   });
 }
 
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
+  const stored = await settingsStore.load();
+  applySettings({
+    trayEnabled: stored.trayEnabled,
+    startWithWindows: settings.startWithWindowsSupported
+      ? app.getLoginItemSettings().openAtLogin
+      : false,
+    startWithWindowsSupported: settings.startWithWindowsSupported,
+  });
+
   registerIpc();
   createWindow();
 
@@ -163,9 +304,14 @@ void app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  // With the tray on, a closed window is not a closed app — the whole point is
+  // that schedules keep firing. Quitting is an explicit act, from the tray menu.
+  if (settings.trayEnabled && !quitting) return;
   if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('before-quit', () => {
+  quitting = true;
+  destroyTray();
   void registry.dispose();
 });
