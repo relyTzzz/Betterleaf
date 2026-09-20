@@ -749,7 +749,18 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
       libraryCount: this.#libraryCount,
       soundReactiveEffects: this.#soundReactiveNames,
       rooms: this.#roomList.map((room) => this.#toRoomView(room)),
-      schedules: this.#scheduleList.map((schedule) => this.#toScheduleView(schedule)),
+      // Sorted by time of day rather than by when they were created, so the
+      // list reads like a day: the 7am schedule sits above the 11pm one. Ties
+      // fall back to name and then to stored order, so the sort is total and
+      // cannot jitter between snapshots.
+      schedules: [...this.#scheduleList]
+        .sort(
+          (a, b) =>
+            a.timeMinutes - b.timeMinutes ||
+            a.name.localeCompare(b.name) ||
+            a.order - b.order,
+        )
+        .map((schedule) => this.#toScheduleView(schedule)),
       settings: this.#settings,
       unpaired: this.#unpaired,
       discovery: this.#discovery,

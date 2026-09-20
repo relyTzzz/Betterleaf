@@ -447,6 +447,45 @@ describe('schedules against devices', () => {
     expect(reg.snapshot().schedules).toHaveLength(0);
   });
 
+  it('lists schedules by time of day, not by when they were made', async () => {
+    const { sims: started, registry: reg } = await setup(['NL29']);
+    const target = { kind: 'device' as const, serialNo: started[0]!.serialNo };
+    const base = {
+      enabled: true,
+      target,
+      days: [0, 1, 2, 3, 4, 5, 6],
+      action: { power: true },
+    };
+
+    // Created deliberately out of order.
+    await reg.createSchedule({ ...base, name: 'Bedtime', timeMinutes: 23 * 60 });
+    await reg.createSchedule({ ...base, name: 'Morning', timeMinutes: 7 * 60 });
+    await reg.createSchedule({ ...base, name: 'Evening', timeMinutes: 18 * 60 + 30 });
+
+    expect(reg.snapshot().schedules.map((s) => s.name)).toEqual([
+      'Morning',
+      'Evening',
+      'Bedtime',
+    ]);
+  });
+
+  it('breaks ties at the same time by name, so the order never jitters', async () => {
+    const { sims: started, registry: reg } = await setup(['NL29']);
+    const target = { kind: 'device' as const, serialNo: started[0]!.serialNo };
+    const base = {
+      enabled: true,
+      target,
+      timeMinutes: 7 * 60,
+      days: [1],
+      action: { power: true },
+    };
+
+    await reg.createSchedule({ ...base, name: 'Zebra' });
+    await reg.createSchedule({ ...base, name: 'Apple' });
+
+    expect(reg.snapshot().schedules.map((s) => s.name)).toEqual(['Apple', 'Zebra']);
+  });
+
   it('shows the target name and the next run in the snapshot', async () => {
     const { registry: reg } = await setup(['NL29']);
     const roomId = await reg.createRoom('Office');
