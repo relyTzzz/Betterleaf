@@ -5,7 +5,7 @@
   "description": "A better controller for Nanoleaf lighting products",
   "license": "MIT",
   "author": "Cranium AI",
-  "homepage": "https://betterleaf.web.app",
+  "homepage": "https://betterleaf.cranium-ai.com",
   "repository": {
     "type": "git",
     "url": "https://github.com/relyTzzz/Betterleaf.git"

@@ -2,9 +2,9 @@
 
 A better controller for Nanoleaf lighting products. Local-only — no cloud, no account.
 
-**Site:** [betterleaf.web.app](https://betterleaf.web.app) — the
-[download page](https://betterleaf.web.app/download) and the
-[user guide](https://betterleaf.web.app/guide). Made by
+**Site:** [betterleaf.cranium-ai.com](https://betterleaf.cranium-ai.com) — the
+[download page](https://betterleaf.cranium-ai.com/download) and the
+[user guide](https://betterleaf.cranium-ai.com/guide). Made by
 [Cranium AI](https://cranium-ai.com). Free and open source under the
 [MIT license](LICENSE).
 
