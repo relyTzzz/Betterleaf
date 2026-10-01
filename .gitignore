@@ -21,3 +21,6 @@ Thumbs.db
 
 # Effect exports land wherever you run the CLI; not repo content.
 *-effects.json
+
+# Rendered by `pnpm screenshots` for the site and README; regenerate, do not commit.
+screenshots/

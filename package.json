@@ -4,6 +4,15 @@
   "private": true,
   "description": "A better controller for Nanoleaf lighting products",
   "license": "MIT",
+  "author": "Cranium AI",
+  "homepage": "https://betterleaf.web.app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/relyTzzz/Betterleaf.git"
+  },
+  "bugs": {
+    "url": "https://github.com/relyTzzz/Betterleaf/issues"
+  },
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -18,7 +27,8 @@
     "dev": "pnpm --filter @betterleaf/app dev",
     "app": "pnpm --filter @betterleaf/app build && pnpm --filter @betterleaf/app start",
     "package": "pnpm --filter @betterleaf/app package",
-    "package:installer": "pnpm --filter @betterleaf/app package:installer"
+    "package:installer": "pnpm --filter @betterleaf/app package:installer",
+    "screenshots": "node scripts/screenshots.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

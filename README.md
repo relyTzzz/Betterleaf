@@ -2,6 +2,14 @@
 
 A better controller for Nanoleaf lighting products. Local-only — no cloud, no account.
 
+**Site:** [betterleaf.web.app](https://betterleaf.web.app) — the
+[download page](https://betterleaf.web.app/download) and the
+[user guide](https://betterleaf.web.app/guide). Made by
+[Cranium AI](https://cranium-ai.com). Free and open source under the
+[MIT license](LICENSE).
+
+![Betterleaf: a room and two lights in the sidebar, one light's controls and scenes on the right](docs/app.png)
+
 Lights can be grouped into **rooms**, and every scene on your lights is
 archived into a **local library**.
 
@@ -87,7 +95,27 @@ adds Start Menu and desktop shortcuts and registers an uninstaller.
 
 The build is unsigned, so Windows SmartScreen will warn the first time the
 installer runs ("More info" -> "Run anyway"). Signing needs a code-signing
-certificate, which is only worth it if this is ever distributed to anyone else.
+certificate.
+
+### Releasing
+
+A release is a GitHub release on this repository with `Betterleaf-Setup-<version>.exe`
+attached: bump the version in the three `package.json` files, `pnpm package:installer`,
+create the release and upload the installer. The site's download page reads the latest
+release from GitHub's API in the browser and links the installer straight from it, so
+nothing on the site changes for a release.
+
+### Screenshots
+
+```bash
+pnpm screenshots         # -> screenshots/*.png, from the simulator, never from real lights
+```
+
+Starts both fake devices on loopback, seeds a throwaway profile (`--user-data-dir`,
+so your own pairings are untouched) with the lights paired, a room, schedules,
+app rules and a lock, and captures each view over the DevTools protocol
+(`scripts/screenshots.mjs`). The site repository converts them for the guide and
+writes `docs/app.png` above.
 
 The app icon lives in `packages/app/build/` as `icon.ico` (multi-resolution,
 16-256px) and `icon.png`.
@@ -171,6 +199,14 @@ The last two are the whole point of the project, so they matter most.
 Two open questions are marked `TODO(hardware)` in the source: whether effect
 writes need an explicit `"version": "2.0"` field, and the Rhythm/control-square
 `shapeType` values above. Community sources disagree; the hardware decides.
+
+## Contributing
+
+Issues and pull requests are welcome on GitHub. The conventions that keep the app
+responsive and honest about state are in [CLAUDE.md](CLAUDE.md), which is written
+for anyone working on the code, human or otherwise; the four rules at its top are
+the ones not to undo without a reason. `pnpm test` and `pnpm -r typecheck` run in
+CI on every push.
 
 ## Notes on Docker
 

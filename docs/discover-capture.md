@@ -68,10 +68,10 @@ Windows Firewall will likely prompt — allow it on **private** networks only.
 
 ### 2. Point the phone at it
 
-This PC is `192.168.1.73` on your LAN.
+Find this PC's address on the LAN with `ipconfig` (the IPv4 address of the Wi-Fi or Ethernet adapter); the examples below use `192.168.1.10`.
 
 - **iOS:** Settings → Wi-Fi → (i) next to your network → Configure Proxy → Manual
-  → Server `192.168.1.73`, Port `8080`
+  → Server `192.168.1.10`, Port `8080`
 - **Android:** Wi-Fi → long-press network → Modify → Advanced → Proxy: Manual →
   same values
 
