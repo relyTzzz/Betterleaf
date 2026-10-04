@@ -297,6 +297,16 @@ hardware is the only authority:
 `pnpm package` (app dir) and `pnpm package:installer` (NSIS) via electron-builder,
 configured in `packages/app/electron-builder.yml`.
 
+- **Never package while Betterleaf runs from `release/`.** electron-builder
+  empties `win-unpacked` first; the running copy's exe and DLLs are locked, so
+  everything else is deleted (`resources.pak`, `locales/`, `snapshot_blob.bin`)
+  and the final rename from `win-unpacked.tmp` fails. The remains still launch,
+  without Chromium's built-in stylesheet: the `<title>` drawn across the top,
+  every `div` inline, slider thumbs ignoring their values. It went unnoticed
+  from 2026-09-30 to 10-04, because closing the window only hides to the tray.
+  `scripts/assert-not-running.mjs` now refuses to start either package script
+  while a copy runs from `release/`. Chromium's `debug.log` in `win-unpacked`
+  says `Failed to load ...resources.pak` when it has happened.
 - `@betterleaf/protocol` is in the app's **devDependencies**, not dependencies.
   electron-vite bundles it into `out/`, so it is a build-time dependency; leaving
   it under `dependencies` makes electron-builder try to ship a pnpm-symlinked

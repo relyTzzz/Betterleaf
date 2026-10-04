@@ -9,8 +9,8 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "package": "electron-vite build && electron-builder --dir",
-    "package:installer": "electron-vite build && electron-builder --win nsis"
+    "package": "node ../../scripts/assert-not-running.mjs && electron-vite build && electron-builder --dir",
+    "package:installer": "node ../../scripts/assert-not-running.mjs && electron-vite build && electron-builder --win nsis"
   },
   "devDependencies": {
     "@betterleaf/protocol": "workspace:*",
