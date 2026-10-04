@@ -61,6 +61,13 @@ export function stillHolding(
 ): boolean {
   if (!current) return false;
   if (applied.effect !== undefined) return current.effect === applied.effect;
+  if (applied.color !== undefined) {
+    return (
+      current.colorMode === 'hs' &&
+      current.hue === applied.color.hue &&
+      current.sat === applied.color.saturation
+    );
+  }
   if (applied.brightness !== undefined) return current.brightness === applied.brightness;
   if (applied.power !== undefined) return current.on === applied.power;
   // A rule that set nothing borrowed nothing.

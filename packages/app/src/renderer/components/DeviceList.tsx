@@ -136,6 +136,21 @@ export function DeviceList({ onPair }: { onPair: (device: UnpairedDeviceView) =>
                 : snapshot.appRules.filter((r) => r.enabled).length}
             </span>
           </button>
+          <button
+            className={`library-link${selection?.kind === 'hooks' ? ' selected' : ''}`}
+            onClick={() => select({ kind: 'hooks' })}
+          >
+            <span>Hooks</span>
+            <span className="room-count">
+              {!snapshot.hookServer.listening
+                ? snapshot.hookServer.error
+                  ? 'error'
+                  : 'off'
+                : snapshot.hooks.some((h) => h.active)
+                  ? 'active'
+                  : snapshot.hooks.filter((h) => h.enabled).length}
+            </span>
+          </button>
         </>
       )}
 

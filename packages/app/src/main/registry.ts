@@ -21,6 +21,10 @@ import type {
   AppSnapshot,
   DeviceView,
   DiscoveryState,
+  Hook,
+  HookInput,
+  HookServerView,
+  HookView,
   PairProgress,
   LibraryEntryView,
   MotionView,
@@ -46,6 +50,9 @@ import { EffectHarvester } from './effects/harvester.js';
 import { EffectLibrary, effectHash } from './effects/library.js';
 import { AppRuleStore, targetKey, type CapturedDevice } from './app-rule-store.js';
 import { AppRuleEngine, type AppRuleEngineOptions } from './app-rules.js';
+import { DEFAULT_HOOK_PORT } from '../shared/hooks.js';
+import { HookStore } from './hook-store.js';
+import { HookEngine, type FireOutcome, type HookEngineOptions } from './hooks.js';
 import { LockStore } from './lock-store.js';
 import { listRunningProcesses, matchProcess, type ListProcesses } from './process-watch.js';
 import { RoomStore } from './room-store.js';
@@ -97,6 +104,8 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
   readonly #locks: LockStore;
   readonly #appRules: AppRuleStore;
   readonly #ruleEngine: AppRuleEngine;
+  readonly #hooks: HookStore;
+  readonly #hookEngine: HookEngine;
   readonly #library: EffectLibrary;
   readonly #harvester: EffectHarvester;
   readonly #devices = new Map<string, NanoleafDevice>();
@@ -121,6 +130,19 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
   #appRuleList: AppRule[] = [];
   #heldSerials = new Set<string>();
   #holdingRuleIds = new Set<string>();
+
+  /** Hooks, mirrored for the synchronous snapshot like everything else. */
+  #hookList: Hook[] = [];
+
+  /**
+   * Whether the listener is up. Owned by the main process, which owns the
+   * socket; carried here only to ride along in the snapshot.
+   */
+  #hookServer: HookServerView = {
+    enabled: false,
+    port: DEFAULT_HOOK_PORT,
+    listening: false,
+  };
 
   /**
    * Owned by the main process, not by this class — whether the app keeps running
@@ -158,6 +180,8 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     appRules = new AppRuleStore(),
     listProcesses: ListProcesses = listRunningProcesses,
     ruleEngineOptions: AppRuleEngineOptions = {},
+    hooks = new HookStore(),
+    hookEngineOptions: HookEngineOptions = {},
   ) {
     super();
     this.#store = store;
@@ -203,6 +227,16 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     );
 
     this.#ruleEngine.on('changed', () => void this.#refreshAppRules());
+
+    // Hooks go through the same door as schedules, so a lock or an app rule
+    // holds them off in exactly the same way: one precedence order to learn.
+    this.#hooks = hooks;
+    this.#hookEngine = new HookEngine(
+      hooks,
+      (target, action) => this.#applySchedule(target, action),
+      hookEngineOptions,
+    );
+    this.#hookEngine.on('changed', () => this.#publish());
     this.#scheduler = new Scheduler(
       schedules,
       (target, action) => this.#applySchedule(target, action),
@@ -226,6 +260,23 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
   #libraryCount = 0;
   #soundReactiveNames: string[] = [];
 
+  /** Settles once stored configuration is read, long before discovery ends. */
+  #markLoaded: () => void = () => {};
+  readonly #loaded = new Promise<void>((resolve) => {
+    this.#markLoaded = resolve;
+  });
+
+  /**
+   * Resolves once rooms, rules and hooks are loaded.
+   *
+   * The hook listener waits on this rather than on `start`, which runs until
+   * discovery finishes: a hook fired in the first seconds after launch should
+   * work, not answer that no such hook exists because it had not been read yet.
+   */
+  whenLoaded(): Promise<void> {
+    return this.#loaded;
+  }
+
   /**
    * Bring up everything we knew about last time, then look for the rest.
    *
@@ -238,9 +289,12 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     this.#scheduleList = await this.#schedules.load();
     this.#lockedSerials = new Set(await this.#locks.load());
     this.#appRuleList = await this.#appRules.load();
+    this.#hookList = await this.#hooks.load();
     await this.#refreshLibrarySummaryQuietly();
     this.#scheduler.start();
     this.#ruleEngine.start();
+    await this.#hookEngine.start();
+    this.#markLoaded();
     await this.scan(known);
   }
 
@@ -383,7 +437,10 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     await this.#schedules.pruneDevice(serialNo);
     await this.#locks.prune(serialNo);
     await this.#appRules.pruneDevice(serialNo);
+    await this.#hooks.pruneDevice(serialNo);
     this.#appRuleList = await this.#appRules.load();
+    this.#hookList = await this.#hooks.load();
+    await this.#hookEngine.reload();
     this.#roomList = await this.#rooms.load();
     this.#scheduleList = await this.#schedules.load();
     this.#lockedSerials = new Set(await this.#locks.load());
@@ -592,8 +649,11 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     // Same reasoning as forgetting a device: no schedule may outlive its target.
     await this.#schedules.pruneRoom(roomId);
     await this.#appRules.pruneRoom(roomId);
+    await this.#hooks.pruneRoom(roomId);
     this.#scheduleList = await this.#schedules.load();
     this.#appRuleList = await this.#appRules.load();
+    this.#hookList = await this.#hooks.load();
+    await this.#hookEngine.reload();
     await this.#refreshRooms();
   }
 
@@ -801,6 +861,10 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
         throw new Error(`does not have the scene "${action.effect}"`);
       }
       await device.selectEffect(action.effect);
+    } else if (action.color !== undefined) {
+      // Every model takes a solid colour, so unlike a scene there is nothing
+      // to check first.
+      await device.setHueSat(action.color.hue, action.color.saturation);
     }
 
     if (action.brightness !== undefined) await device.setBrightness(action.brightness);
@@ -871,6 +935,76 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     );
   }
 
+  // --- hooks -----------------------------------------------------------------
+
+  async createHook(input: HookInput): Promise<string> {
+    const hook = await this.#hooks.create(input);
+    await this.#refreshHooks();
+    return hook.id;
+  }
+
+  async updateHook(id: string, input: HookInput): Promise<void> {
+    await this.#hooks.update(id, input);
+    await this.#refreshHooks();
+  }
+
+  async deleteHook(id: string): Promise<void> {
+    await this.#hooks.remove(id);
+    await this.#refreshHooks();
+  }
+
+  async setHookEnabled(id: string, enabled: boolean): Promise<void> {
+    await this.#hooks.setEnabled(id, enabled);
+    await this.#refreshHooks();
+  }
+
+  async reorderHooks(ids: string[]): Promise<void> {
+    await this.#hooks.reorder(ids);
+    await this.#refreshHooks();
+  }
+
+  /** Apply a hook's action now, to see what it looks like. */
+  testHook(id: string): Promise<{ ok: boolean; error?: string }> {
+    return this.#hookEngine.test(id);
+  }
+
+  clearHookSources(): void {
+    this.#hookEngine.clearSources();
+  }
+
+  /** A caller fired a hook by its address. Answers before the lights move. */
+  fireHook(slug: string, source: string): FireOutcome {
+    return this.#hookEngine.fire(slug, source);
+  }
+
+  releaseHookSource(source: string): void {
+    this.#hookEngine.release(source);
+  }
+
+  /** Resolves once every report so far has reached the lights. For tests. */
+  hooksSettled(): Promise<void> {
+    return this.#hookEngine.settled();
+  }
+
+  /** What the listener lists at `GET /hooks`. */
+  hookSummaries(): { slug: string; name: string; enabled: boolean }[] {
+    return this.#hookList.map((h) => ({ slug: h.slug, name: h.name, enabled: h.enabled }));
+  }
+
+  /** Let the main process tell the renderer whether the listener is up. */
+  setHookServer(view: HookServerView): void {
+    this.#hookServer = view;
+    this.#publish();
+  }
+
+  async #refreshHooks(): Promise<void> {
+    this.#hookList = await this.#hooks.load();
+    // Re-settles every target: a reorder can change a winner, and editing the
+    // hook that is winning should show the edit rather than wait for a report.
+    await this.#hookEngine.reload();
+    this.#publish();
+  }
+
   async #refreshAppRules(): Promise<void> {
     this.#appRuleList = await this.#appRules.load();
     this.#heldSerials = await this.#ruleEngine.heldSerials();
@@ -887,6 +1021,10 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
       on: device.state.on,
       brightness: device.state.brightness,
       effect: device.currentEffect,
+      colorMode: device.state.colorMode,
+      hue: device.state.hue,
+      sat: device.state.sat,
+      ct: device.state.ct,
     };
   }
 
@@ -901,6 +1039,12 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     await device.setPower(true);
     if (state.effect && device.effects.includes(state.effect)) {
       await device.selectEffect(state.effect);
+    } else if (state.colorMode === 'hs' && state.hue !== undefined && state.sat !== undefined) {
+      // A solid colour reports a pseudo-scene that cannot be selected, so it
+      // has to be put back as the colour itself.
+      await device.setHueSat(state.hue, state.sat);
+    } else if (state.colorMode === 'ct' && state.ct !== undefined) {
+      await device.setColorTemp(state.ct);
     }
     await device.setBrightness(state.brightness);
   }
@@ -987,10 +1131,23 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
         )
         .map((schedule) => this.#toScheduleView(schedule)),
       appRules: this.#appRuleList.map((rule) => this.#toAppRuleView(rule)),
+      hooks: this.#hookList.map((hook) => this.#toHookView(hook)),
+      hookServer: this.#hookServer,
       settings: this.#settings,
       unpaired: this.#unpaired,
       discovery: this.#discovery,
     };
+  }
+
+  #toHookView(hook: Hook): HookView {
+    const view: HookView = { ...hook, ...this.#hookEngine.stateOf(hook) };
+    const target = hook.target;
+    const name =
+      target.kind === 'device'
+        ? this.#devices.get(target.serialNo)?.name
+        : this.#roomList.find((r) => r.id === target.roomId)?.name;
+    if (name !== undefined) view.targetName = name;
+    return view;
   }
 
   #toAppRuleView(rule: AppRule): AppRuleView {
@@ -1087,6 +1244,7 @@ export class DeviceRegistry extends EventEmitter<RegistryEvents> {
     this.#pairAbort?.abort();
     this.#scheduler.stop();
     this.#ruleEngine.stop();
+    this.#hookEngine.stop();
     this.#harvester.stop();
     await Promise.all([...this.#devices.values()].map((d) => d.close()));
     this.#devices.clear();

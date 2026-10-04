@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { create } from 'zustand';
+import { DEFAULT_HOOK_PORT } from '../../shared/hooks.js';
 import type {
   AppSnapshot,
   BetterleafApi,
@@ -22,7 +23,8 @@ export type Selection =
   | { kind: 'room'; id: string }
   | { kind: 'library' }
   | { kind: 'schedules' }
-  | { kind: 'app-rules' };
+  | { kind: 'app-rules' }
+  | { kind: 'hooks' };
 
 interface AppState {
   snapshot: AppSnapshot;
@@ -40,6 +42,8 @@ const EMPTY: AppSnapshot = {
   rooms: [],
   schedules: [],
   appRules: [],
+  hooks: [],
+  hookServer: { enabled: false, port: DEFAULT_HOOK_PORT, listening: false },
   settings: {
     trayEnabled: true,
     startWithWindows: false,
@@ -55,7 +59,8 @@ function stillValid(selection: Selection | undefined, snapshot: AppSnapshot): bo
   if (
     selection.kind === 'library' ||
     selection.kind === 'schedules' ||
-    selection.kind === 'app-rules'
+    selection.kind === 'app-rules' ||
+    selection.kind === 'hooks'
   ) {
     return true;
   }

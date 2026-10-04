@@ -4,10 +4,13 @@ import {
   IPC,
   type AppRuleInput,
   type AppSettings,
+  type HookInput,
+  type HookServerView,
   type ScheduleInput,
 } from '../shared/types.js';
+import { HookServer, describeListenError } from './hook-server.js';
 import { DeviceRegistry } from './registry.js';
-import { SettingsStore } from './settings-store.js';
+import { SettingsStore, cleanPort } from './settings-store.js';
 
 // Before anything reads app.getPath('userData'): the package name is scoped
 // (@betterleaf/app), which would otherwise become the directory name on disk.
@@ -25,6 +28,11 @@ Menu.setApplicationMenu(null);
 
 const registry = new DeviceRegistry();
 const settingsStore = new SettingsStore();
+const hookServer = new HookServer({
+  fire: (slug, source) => registry.fireHook(slug, source),
+  release: (source) => registry.releaseHookSource(source),
+  list: () => registry.hookSummaries(),
+});
 let window: BrowserWindow | undefined;
 let tray: Tray | undefined;
 
@@ -128,6 +136,28 @@ function applySettings(next: AppSettings): void {
   if (settings.trayEnabled) buildTray();
   else destroyTray();
   registry.setSettings(settings);
+}
+
+/**
+ * Bring the hook listener in line with what was asked for, and report the
+ * result rather than the request: a port another program holds leaves the
+ * toggle on and says why nothing is listening.
+ */
+async function applyHookServer(enabled: boolean, port: number): Promise<void> {
+  const view: HookServerView = { enabled, port, listening: false };
+  if (!enabled) {
+    await hookServer.stop();
+  } else if (hookServer.listening && hookServer.port === port) {
+    view.listening = true;
+  } else {
+    try {
+      await hookServer.start(port);
+      view.listening = true;
+    } catch (err) {
+      view.error = describeListenError(err, port);
+    }
+  }
+  registry.setHookServer(view);
 }
 
 function createWindow(): void {
@@ -238,6 +268,23 @@ function registerIpc(): void {
   );
   ipcMain.handle(IPC.listRunningApps, () => registry.listRunningApps());
 
+  ipcMain.handle(IPC.createHook, (_e, input: HookInput) => registry.createHook(input));
+  ipcMain.handle(IPC.updateHook, (_e, id: string, input: HookInput) =>
+    registry.updateHook(id, input),
+  );
+  ipcMain.handle(IPC.deleteHook, (_e, id: string) => registry.deleteHook(id));
+  ipcMain.handle(IPC.setHookEnabled, (_e, id: string, enabled: boolean) =>
+    registry.setHookEnabled(id, enabled),
+  );
+  ipcMain.handle(IPC.reorderHooks, (_e, ids: string[]) => registry.reorderHooks(ids));
+  ipcMain.handle(IPC.testHook, (_e, id: string) => registry.testHook(id));
+  ipcMain.handle(IPC.clearHookSources, () => registry.clearHookSources());
+  ipcMain.handle(IPC.setHookServer, async (_e, enabled: boolean, port: number) => {
+    const clean = cleanPort(port);
+    await settingsStore.update({ hooksEnabled: enabled, hooksPort: clean });
+    await applyHookServer(enabled, clean);
+  });
+
   ipcMain.handle(IPC.setDeviceLocked, (_e, serial: string, locked: boolean) =>
     registry.setDeviceLocked(serial, locked),
   );
@@ -246,7 +293,7 @@ function registerIpc(): void {
   );
 
   ipcMain.handle(IPC.setTrayEnabled, async (_e, enabled: boolean) => {
-    await settingsStore.save({ trayEnabled: enabled });
+    await settingsStore.update({ trayEnabled: enabled });
     applySettings({ ...settings, trayEnabled: enabled });
   });
 
@@ -341,6 +388,11 @@ void app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+
+  // Up whether or not the window ever opens: a login item starts hidden in the
+  // tray, and hooks should work from then on.
+  await registry.whenLoaded();
+  await applyHookServer(stored.hooksEnabled, stored.hooksPort);
 });
 
 app.on('window-all-closed', () => {
@@ -353,5 +405,6 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   quitting = true;
   destroyTray();
+  void hookServer.stop();
   void registry.dispose();
 });

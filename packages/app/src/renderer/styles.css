@@ -217,6 +217,8 @@ input[type='text'] {
   margin-left: auto;
   display: flex;
   gap: 8px;
+  /* A long subtitle must not squeeze the button into two lines. */
+  flex: none;
 }
 
 .card {
@@ -1064,4 +1066,178 @@ input[type='range'].ct {
 .path-entry {
   border-bottom: 1px dotted var(--text-faint);
   cursor: help;
+}
+
+/* --- hooks ---------------------------------------------------------------- */
+
+.listener-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding-left: 23px;
+}
+.port-field {
+  margin-bottom: 0;
+}
+.port-field > span {
+  min-width: 0;
+}
+.port-field input[type='text'] {
+  width: 76px;
+  font-variant-numeric: tabular-nums;
+}
+.listener-status {
+  font-size: 12.5px;
+  color: var(--text-faint);
+}
+.listener-status.ok {
+  color: var(--ok);
+}
+.listener-status.warn {
+  color: var(--warn);
+}
+
+.claude-panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 12px 16px;
+  margin-bottom: 18px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+.claude-panel summary {
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 550;
+}
+.claude-panel p {
+  margin: 10px 0;
+  max-width: 68ch;
+}
+.claude-panel p .swatch {
+  margin-right: 1px;
+}
+.claude-panel code,
+.hook-address code {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 11.5px;
+}
+.claude-panel p code {
+  background: var(--bg-raised);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.snippet {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0 0 8px;
+  max-height: 260px;
+  overflow: auto;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text);
+  user-select: text;
+}
+.snippet-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.snippet-actions .hint {
+  margin: 0;
+}
+
+.swatch {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: -1px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.hook-address {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.hook-address code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+}
+button.copy {
+  font-size: 11px;
+  padding: 2px 8px;
+  flex: none;
+}
+button.inline-link {
+  font-size: inherit;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.slug-input {
+  display: flex;
+  align-items: stretch;
+}
+.slug-input > span {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  color: var(--text-faint);
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 12px;
+}
+.schedule-editor .slug-input input[type='text'] {
+  flex: 1;
+  min-width: 0;
+  border-radius: 0 8px 8px 0;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 12.5px;
+}
+
+.colour-picker {
+  margin: 2px 0 10px;
+}
+.colour-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.colour-preset {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+.colour-preset.on {
+  border-color: var(--text);
+}
+.colour-current {
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
 }

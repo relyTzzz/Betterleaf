@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { AppRulesView } from './components/AppRulesView.js';
 import { DeviceDetail } from './components/DeviceDetail.js';
 import { DeviceList } from './components/DeviceList.js';
+import { HooksView } from './components/HooksView.js';
 import { LibraryView } from './components/LibraryView.js';
 import { PairDialog } from './components/PairDialog.js';
 import { RoomDetail } from './components/RoomDetail.js';
@@ -24,6 +25,7 @@ export function App() {
   const showLibrary = useApp((s) => s.selection?.kind === 'library');
   const showSchedules = useApp((s) => s.selection?.kind === 'schedules');
   const showAppRules = useApp((s) => s.selection?.kind === 'app-rules');
+  const showHooks = useApp((s) => s.selection?.kind === 'hooks');
   const [pairing, setPairing] = useState<{ device?: UnpairedDeviceView } | undefined>();
 
   const { scanning, rung } = snapshot.discovery;
@@ -52,6 +54,8 @@ export function App() {
         <SchedulesView />
       ) : showAppRules ? (
         <AppRulesView />
+      ) : showHooks ? (
+        <HooksView />
       ) : room ? (
         <RoomDetail room={room} />
       ) : device ? (

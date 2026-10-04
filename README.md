@@ -11,7 +11,11 @@ A better controller for Nanoleaf lighting products. Local-only — no cloud, no 
 ![Betterleaf: a room and two lights in the sidebar, one light's controls and scenes on the right](docs/app.png)
 
 Lights can be grouped into **rooms**, and every scene on your lights is
-archived into a **local library**.
+archived into a **local library**. Other programs can change the lights
+through **hooks**: Betterleaf listens on loopback, and anything that can send
+a web request can fire one. Claude Code can, with no script in between: the
+Hooks view creates working, waiting and done hooks and hands you the
+`settings.json` block that points Claude Code at them.
 
 That last part is the interesting one. Nanoleaf’s Discover marketplace
 delivers scenes *to the devices*, so the devices already hold everything you
@@ -57,7 +61,7 @@ will bundle it.
 
 ```bash
 pnpm install
-pnpm test          # 87 tests, no hardware needed
+pnpm test          # 265 tests, no hardware needed
 pnpm -r typecheck
 ```
 

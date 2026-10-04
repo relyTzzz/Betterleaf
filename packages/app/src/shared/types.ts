@@ -141,6 +141,14 @@ export interface ScheduleAction {
   power?: boolean;
   /** Scene to select, by name. */
   effect?: string;
+  /**
+   * A solid colour instead of a scene.
+   *
+   * Hue 0–360, saturation 0–100, as the device takes them. It occupies the
+   * same place as `effect` — the panels show one or the other — so the store
+   * keeps the scene and drops the colour if both ever arrive together.
+   */
+  color?: { hue: number; saturation: number };
   /** 0–100. */
   brightness?: number;
 }
@@ -241,6 +249,63 @@ export interface AppRuleView extends AppRule {
   matchedProcess?: string;
 }
 
+/**
+ * Something another program can fire by address to change the lights.
+ *
+ * Same target and action model as schedules and app rules; only the trigger
+ * differs. A hook is fired by an HTTP request to Betterleaf on loopback —
+ * Claude Code's own `http` hooks, a script, a Stream Deck button.
+ */
+export interface Hook {
+  id: string;
+  name: string;
+  /**
+   * The last part of its address: `POST /hooks/<slug>`.
+   *
+   * Separate from the name and kept when the hook is renamed, because whatever
+   * calls it has the address written into its own configuration, and renaming
+   * the hook must not silently break that.
+   */
+  slug: string;
+  enabled: boolean;
+  target: ScheduleTarget;
+  action: ScheduleAction;
+  /**
+   * 0 is highest. Only matters when several callers report different hooks for
+   * the same lights at once — two Claude Code sessions, one waiting on you and
+   * one finished — and then the higher one is what the lights show.
+   */
+  priority: number;
+}
+
+export type HookInput = Omit<Hook, 'id' | 'priority'>;
+
+export interface HookView extends Hook {
+  /** The room or light this points at, or undefined once it is gone. */
+  targetName?: string;
+  /** How many callers currently have this hook as their latest report. */
+  sources: number;
+  /**
+   * True when this is the winning report for its lights: what the callers,
+   * taken together, are asking them to show. Whether they actually do — a
+   * lock or an app rule can hold them — is `lastResult`.
+   */
+  active: boolean;
+  lastFiredAt?: number;
+  /** 'ok', 'locked', 'held-by-app', or the error that stopped it. */
+  lastResult?: string;
+}
+
+/** Whether Betterleaf is listening for hooks, and where. */
+export interface HookServerView {
+  enabled: boolean;
+  port: number;
+  /** True once the socket is actually bound, not merely asked for. */
+  listening: boolean;
+  /** Why it is not listening when it was asked to, in words. */
+  error?: string;
+}
+
 /** A program currently running, offered so rules can be built without typing. */
 export interface RunningApp {
   /** Executable name, lowercased. */
@@ -336,6 +401,8 @@ export interface AppSnapshot {
   rooms: RoomView[];
   schedules: ScheduleView[];
   appRules: AppRuleView[];
+  hooks: HookView[];
+  hookServer: HookServerView;
   settings: AppSettings;
   unpaired: UnpairedDeviceView[];
   discovery: DiscoveryState;
@@ -392,6 +459,22 @@ export interface BetterleafApi {
   /** Programs running right now, so a rule can be built without typing names. */
   listRunningApps(): Promise<RunningApp[]>;
 
+  /** Resolves to the hook's id. */
+  createHook(input: HookInput): Promise<string>;
+  updateHook(id: string, input: HookInput): Promise<void>;
+  deleteHook(id: string): Promise<void>;
+  setHookEnabled(id: string, enabled: boolean): Promise<void>;
+  /** Highest priority first. Ids not mentioned keep their relative order. */
+  reorderHooks(ids: string[]): Promise<void>;
+  /** Apply a hook's action now, as a check, without counting as a caller. */
+  testHook(id: string): Promise<{ ok: boolean; error?: string }>;
+  /** Forget every caller, so a session that died mid-task stops counting. */
+  clearHookSources(): Promise<void>;
+  /** Turn the listener on or off, or move it to another port. */
+  setHookServer(enabled: boolean, port: number): Promise<void>;
+  /** Put text on the clipboard: an address, or settings to paste elsewhere. */
+  copyText(text: string): void;
+
   setTrayEnabled(enabled: boolean): Promise<void>;
   setStartWithWindows(enabled: boolean): Promise<void>;
 
@@ -446,6 +529,14 @@ export const IPC = {
   setAppRuleEnabled: 'betterleaf:setAppRuleEnabled',
   reorderAppRules: 'betterleaf:reorderAppRules',
   listRunningApps: 'betterleaf:listRunningApps',
+  createHook: 'betterleaf:createHook',
+  updateHook: 'betterleaf:updateHook',
+  deleteHook: 'betterleaf:deleteHook',
+  setHookEnabled: 'betterleaf:setHookEnabled',
+  reorderHooks: 'betterleaf:reorderHooks',
+  testHook: 'betterleaf:testHook',
+  clearHookSources: 'betterleaf:clearHookSources',
+  setHookServer: 'betterleaf:setHookServer',
   setDeviceLocked: 'betterleaf:setDeviceLocked',
   setRoomLocked: 'betterleaf:setRoomLocked',
   setTrayEnabled: 'betterleaf:setTrayEnabled',

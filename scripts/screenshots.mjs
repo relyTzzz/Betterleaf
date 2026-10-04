@@ -10,15 +10,22 @@
  *   1. the two fake devices start on loopback with mDNS off (`--no-advertise`),
  *      so nothing on the LAN is touched or advertised to;
  *   2. a throwaway profile is seeded with both lights already paired, a room,
- *      schedules, app rules and a lock, and the app is launched against it with
- *      `--user-data-dir`, so your own pairings are never read or written;
+ *      schedules, app rules, hooks and a lock, and the app is launched against
+ *      it with `--user-data-dir`, so your own pairings are never read or written;
  *   3. the views are walked over the DevTools protocol and each one is captured
  *      at 2x — the app's own Chromium does the rendering, nothing is mocked.
  *
  * The packaged app (`pnpm package`, release/win-unpacked) is used when it exists,
  * because that is what people run: the schedules view, for instance, offers
  * "Start with Windows" only when packaged. Otherwise the dev build in
- * packages/app/out is used — run `pnpm build` first.
+ * packages/app/out is used — run `pnpm build` first. BETTERLEAF_SHOT_BUILD=dev
+ * uses the dev build even when a packaged one exists, for checking a change
+ * before packaging it, and BETTERLEAF_SHOT_OUT sends the pictures elsewhere.
+ *
+ * The hooks view is captured with the listener on (port 16100, or
+ * BETTERLEAF_SHOT_HOOK_PORT) and two simulated Claude Code sessions reporting,
+ * so it shows a hook winning rather than a list at rest. If your own Betterleaf
+ * already listens on that port, set another.
  *
  * Discovery still runs its real rungs (mDNS, SSDP, sweep) while the app is up,
  * so lights on your network may be found and offered for pairing. Those rows are
@@ -34,8 +41,11 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const appDir = path.join(root, 'packages', 'app');
-const outDir = path.join(root, 'screenshots');
+const outDir = process.env.BETTERLEAF_SHOT_OUT
+  ? path.resolve(process.env.BETTERLEAF_SHOT_OUT)
+  : path.join(root, 'screenshots');
 const CDP_PORT = Number(process.env.BETTERLEAF_SHOT_PORT) || 9555;
+const HOOK_PORT = Number(process.env.BETTERLEAF_SHOT_HOOK_PORT) || 16100;
 
 /** The simulator's fixed ports and tokens (tools/simulator/src/cli.ts) and profiles. */
 const SIM = [
@@ -54,7 +64,8 @@ function die(msg) {
 /** Where the app is. */
 function findApp() {
   const packaged = path.join(appDir, 'release', 'win-unpacked', 'Betterleaf.exe');
-  if (process.platform === 'win32' && existsSync(packaged)) {
+  const wantDev = process.env.BETTERLEAF_SHOT_BUILD === 'dev';
+  if (process.platform === 'win32' && existsSync(packaged) && !wantDev) {
     return { exe: packaged, args: [], what: 'packaged app' };
   }
   if (!existsSync(path.join(appDir, 'out', 'main', 'index.js'))) {
@@ -152,8 +163,41 @@ async function seedProfile(dir) {
     ],
     holds: [],
   });
+  const office = { kind: 'room', roomId: ROOM_ID };
+  await write('hooks.json', {
+    version: 1,
+    hooks: [
+      ['claude-waiting', 'Claude Code: waiting on you', { hue: 32, saturation: 100 }, office],
+      ['claude-working', 'Claude Code: working', { hue: 220, saturation: 90 }, office],
+      ['claude-done', 'Claude Code: done', { hue: 130, saturation: 75 }, office],
+      [
+        'build-failed',
+        'Build failed',
+        { hue: 0, saturation: 100 },
+        { kind: 'device', serialNo: SIM[1].serialNo },
+      ],
+    ].map(([slug, name, color, target], i) => ({
+      id: `d9a7c4e3-0003-4000-8000-00000000000${i + 1}`,
+      name,
+      slug,
+      enabled: true,
+      target,
+      action: { power: true, color },
+      priority: i,
+    })),
+  });
   await write('locks.json', { version: 1, locked: [SIM[0].serialNo] });
-  await write('settings.json', { trayEnabled: true });
+  await write('settings.json', { trayEnabled: true, hooksEnabled: true, hooksPort: HOOK_PORT });
+}
+
+/** Report a hook as a Claude Code session would: a POST with its session id. */
+async function fireHook(slug, session) {
+  const res = await fetch(`http://127.0.0.1:${HOOK_PORT}/hooks/${slug}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ session_id: session, hook_event_name: 'UserPromptSubmit' }),
+  });
+  if (res.status !== 204) die(`Firing ${slug} answered ${res.status}: ${await res.text()}`);
 }
 
 /** Start the simulator on loopback and wait until both devices answer. */
@@ -378,6 +422,27 @@ try {
   await cdp.until("!!document.querySelector('.schedule-editor')");
   await sleep(1500); // the running-programs picker appears once the process list is read
   await cdp.shot('rule-editor');
+  await cdp.click('.schedule-editor .buttons button', 'Cancel');
+  await cdp.viewport(1280, 800);
+
+  await cdp.click('.library-link', 'Hooks');
+  if (!(await cdp.until("!!document.querySelector('.listener-status.ok')", 10_000))) {
+    die(`The hook listener did not come up on port ${HOOK_PORT}. Is something else on it?`);
+  }
+  // One session working, another waiting on a permission: waiting is higher in
+  // the list, so it is the one shown, and both are counted as callers.
+  await fireHook('claude-working', 'session-a');
+  await fireHook('claude-waiting', 'session-b');
+  await cdp.until("!!document.querySelector('.rule-card .badge.live')");
+  await cdp.shot('hooks');
+  await cdp.viewport(1280, 1000);
+  await cdp.click('.claude-panel summary');
+  await cdp.eval("document.querySelector('.detail').scrollTop = 0");
+  await cdp.shot('hooks-claude-code');
+  await cdp.click('.claude-panel summary');
+  await cdp.click('.rule-card .schedule-actions button', 'Edit');
+  await cdp.until("!!document.querySelector('.colour-picker')");
+  await cdp.shot('hook-editor');
   await cdp.click('.schedule-editor .buttons button', 'Cancel');
   await cdp.viewport(1280, 800);
 

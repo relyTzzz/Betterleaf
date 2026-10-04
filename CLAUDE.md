@@ -38,7 +38,7 @@ Concretely, four things carry that weight. Don't undo them without a reason:
 
 ## Testing
 
-`pnpm test` runs 227 tests against `tools/simulator` — no hardware required.
+`pnpm test` runs 265 tests against `tools/simulator` — no hardware required.
 
 - The simulator emulates the awkward parts on purpose: 401 before pairing, an
   empty extControl body on Canvas, a Rhythm pseudo-panel in the NL22 layout,
@@ -101,8 +101,9 @@ that still let a schedule dim the scene to 10% would not feel like a lock.
   A room toggle sets all its members; there is no separate room lock to drift.
 - **`RoomView.locked` means *every* member**, not any. A room reading "locked"
   while a schedule could still change one of its lights would be lying.
-- **Only schedules are blocked.** Manual control still works — the lock exists
-  to stop the app changing the scene behind your back, not to stop you.
+- **Only automation is blocked** — schedules, app rules and hooks. Manual
+  control still works: the lock exists to stop the app changing the scene
+  behind your back, not to stop you.
 - **A held slot is still claimed**, and recorded as `locked`. Otherwise
   unlocking at 9am would immediately fire the 7am slot that was deliberately
   skipped. `skipped` is a third outcome in `ApplyOutcome`, deliberately neither
@@ -164,12 +165,68 @@ small ops interface so it is testable without devices or a real process list.
   one back would be undoing your change, not tidying up after the rule.
 - **Holds persist** (`app-rules.json`). Betterleaf restarting while the game is
   still running must not capture the game's own scene as the thing to go back to.
-- **App rules outrank schedules.** A schedule firing at a light a rule is driving
-  is skipped and recorded as `held-by-app`. A lock outranks both.
+- **App rules outrank schedules and hooks.** A schedule or hook firing at a
+  light a rule is driving is skipped and recorded as `held-by-app`. A lock
+  outranks all three.
 - `evaluate()` **joins an in-flight pass** rather than returning early, so a
   caller that awaits it can rely on the state being settled — the same fix the
   harvester needed. Returning early had `createAppRule` racing its own evaluate
   and the snapshot reporting a rule idle while it was already playing.
+
+## Hooks
+
+Other programs change the lights by calling a hook's address:
+`POST http://127.0.0.1:16100/hooks/<slug>`. Built for Claude Code's `http`
+hooks (working / waiting / done), but nothing in it is specific to them.
+`main/hooks.ts` decides, `main/hook-server.ts` listens; neither imports
+Electron, so both are tested without it. The Claude Code mapping and the
+settings snippet live in `shared/hooks.ts`.
+
+- **The listener is opt-in, loopback-only, and has no token.** Off until the
+  user turns it on. Browsers are the threat on loopback, so requests carrying
+  `Origin` or a cross-site `Sec-Fetch-Site` are refused, and `Host` must be a
+  loopback name (DNS rebinding). Firing is POST-only, because a GET can be
+  triggered by any page's `<img>`. A token would keep out nothing that could
+  not also read it from the profile. Verified 2026-10-04: Claude Code 2.1.87
+  posts with axios and sends neither header; Node's `fetch` sends
+  `Sec-Fetch-Mode` but not `Sec-Fetch-Site`, so it passes too.
+- **Answer 204, empty, before touching the lights.** Claude Code waits on
+  every hook it runs, and it reads a response body as hook output — a JSON
+  reply to a PermissionRequest could be taken as deciding the permission.
+- **Callers are counted separately.** The caller is `?source=`, else the
+  body's `session_id` (Claude Code sends it with every event), else one
+  anonymous caller. Each caller's latest report counts; when callers disagree
+  about a target, the hook highest in the list wins. That is what stops one
+  session finishing from painting over another that is waiting on you.
+- **The session id is read from the start of the body.** Only 64 KB is kept: a
+  PostToolUse after a file write carries the whole file. The rest is drained,
+  not refused, because refusing would lose the report with the bulk.
+- **Edge-triggered.** A report that leaves the winner (and its action)
+  unchanged does nothing. Claude Code reports after every tool call; anything
+  else would hammer the lights and fight hand changes.
+- **A failure still claims the target**, like a schedule's slot: no retry on the
+  next identical report, so an unreachable light is not hit on every tool call.
+  Reports arriving while a write is in flight are folded into one more pass.
+- **Nothing is captured or restored.** A caller that wants a scene back fires a
+  hook that sets it. When the last caller leaves, the lights stay as they are,
+  and the next report applies even if it repeats the last one.
+- **Quiet callers expire after an hour.** A session closed with its window
+  never sends SessionEnd; without expiry a dead "working" would outrank every
+  live "done" until restart. Only matters when callers disagree.
+- **Test is not a report.** It applies directly and forgets what the target was
+  showing, so the next report of the winner puts the lights back.
+- **The address is not the name.** Renaming keeps the slug; only typing a new
+  one moves it, because callers have the address in their own config.
+- **`PostToolUse` means working, not done.** It is what ends a wait (after a
+  permission or an answer) and it fires between tools; `Stop` is done.
+  Esc mid-task fires no Stop, so the lights say working until the next prompt.
+
+Colour is part of the shared `ScheduleAction` (`color: { hue, saturation }`),
+cleaned in one place (`main/action.ts`) for all three stores. Only the hook
+editor offers it so far. It competes with `effect` for the panels, so the
+cleaner keeps the scene if both arrive. Restore points capture `colorMode`,
+hue, sat and ct, because a solid colour reports the unselectable `*Solid*` —
+without them, an app rule ending would not put back a hook's colour.
 
 ## Things that have already bitten
 
@@ -196,13 +253,17 @@ small ops interface so it is testable without devices or a real process list.
 
 ## Simulator fidelity
 
-The simulator is only useful while it fails the way hardware fails. Two gaps
-found by running the app against it, both fixed:
+The simulator is only useful while it fails the way hardware fails. Three gaps
+found by running the app against it, all fixed:
 
 - **SSE keepalives.** Real controllers dribble traffic down an idle event
   stream; the client watchdog treats 60s of total silence as a wedged socket.
   A simulator that sent nothing made a quiet device flap between connected and
   reconnecting, which looked like an app bug and was not.
+- **Colour writes leave the scene.** A hue/sat write switches the device to
+  `colorMode: "hs"` and the pseudo-scene `*Solid*`; selecting a scene sets
+  `colorMode: "effect"`. The simulator did neither, so restoring a colour
+  could pass here and fail on hardware.
 - **Factory effects need bodies.** `info.effects.effectsList` holds names, but
   `requestAll` must return full documents for them too. Storing only effects
   written through the API made export come back empty on a fresh device.
@@ -215,6 +276,8 @@ hardware is the only authority:
 - Whether effect writes need an explicit `"version": "2.0"` field.
 - The actual `panelId`/`shapeType` the NL22 reports for its Rhythm module.
 - Whether the NL29 control square is an illuminated panel (assumed yes).
+- Whether both models announce `*Solid*` over the event stream after a colour
+  write, or only report it to a fresh GET (the simulator announces it).
 
 ## App-specific notes
 

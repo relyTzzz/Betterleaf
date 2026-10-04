@@ -413,6 +413,24 @@ export class NanoleafSimulator extends EventEmitter<SimEvents> {
       this.#broadcast(1, { events: [{ attr, value }] });
     }
 
+    // Writing a colour takes the panels off whatever scene was playing and
+    // onto a solid colour, which the device reports as a colour mode and as
+    // the pseudo-scene `*Solid*` — one that is in no effects list and cannot
+    // be selected. Without this, code that restores "the scene that was
+    // showing" passes here and fails on hardware.
+    // TODO(hardware): confirm both models announce `*Solid*` over the event
+    // stream, not only in a fresh GET.
+    const mode = 'hue' in patch || 'sat' in patch ? 'hs' : 'ct' in patch ? 'ct' : undefined;
+    if (mode !== undefined && !('colorMode' in patch)) {
+      this.#applyStateAttr(6, mode);
+      this.#broadcast(1, { events: [{ attr: 6, value: mode }] });
+    }
+    if (mode !== undefined) {
+      this.#streamVersion = undefined;
+      this.#info.effects.select = '*Solid*';
+      this.#broadcast(3, { events: [{ attr: 1, value: '*Solid*' }] });
+    }
+
     this.#send(res, 204);
   }
 
@@ -429,6 +447,11 @@ export class NanoleafSimulator extends EventEmitter<SimEvents> {
       const name = payload['select'];
       this.#streamVersion = undefined;
       this.#info.effects.select = name;
+      // Selecting a scene leaves solid-colour mode, the reverse of a colour write.
+      if (this.#info.state.colorMode !== 'effect') {
+        this.#applyStateAttr(6, 'effect');
+        this.#broadcast(1, { events: [{ attr: 6, value: 'effect' }] });
+      }
       this.#broadcast(3, { events: [{ attr: 1, value: name }] });
       this.#send(res, 204);
       return;

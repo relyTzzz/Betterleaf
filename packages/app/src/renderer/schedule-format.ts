@@ -60,11 +60,49 @@ export function displayTime(timeMinutes: number): string {
   return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
 
+/**
+ * A colour as a person would say it: "orange", not "hue 32°".
+ *
+ * Coarse on purpose — it is a label beside a swatch, and the swatch carries
+ * the exact colour. Low saturation reads as white whatever the hue, because
+ * that is what the panels show.
+ */
+export function colourName(color: { hue: number; saturation: number }): string {
+  if (color.saturation < 15) return 'white';
+  const names: [number, string][] = [
+    [15, 'red'],
+    [38, 'orange'],
+    [50, 'amber'],
+    [70, 'yellow'],
+    [160, 'green'],
+    [195, 'teal'],
+    [255, 'blue'],
+    [290, 'purple'],
+    [340, 'pink'],
+    [361, 'red'],
+  ];
+  const name = names.find(([upTo]) => color.hue < upTo)?.[1] ?? 'red';
+  return color.saturation < 50 ? `pale ${name}` : name;
+}
+
+/**
+ * The CSS for a device colour, for swatches.
+ *
+ * The device's model is hue, saturation and brightness; CSS's nearest is HSL.
+ * At full brightness the conversion collapses to full HSL saturation and a
+ * lightness that rises from 50% to white as saturation falls.
+ */
+export function colourCss(color: { hue: number; saturation: number }): string {
+  const lightness = 100 - color.saturation / 2;
+  return `hsl(${color.hue} 100% ${lightness}%)`;
+}
+
 export function describeAction(action: ScheduleAction): string {
   const parts: string[] = [];
   if (action.power === false) return 'Turn off';
   if (action.power === true) parts.push('Turn on');
   if (action.effect !== undefined) parts.push(`play "${action.effect}"`);
+  if (action.color !== undefined) parts.push(colourName(action.color));
   if (action.brightness !== undefined) parts.push(`${action.brightness}% brightness`);
   if (parts.length === 0) return 'Do nothing';
   return parts.join(', ').replace(/^./, (c) => c.toUpperCase());

@@ -2,7 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { app } from 'electron';
-import type { Schedule, ScheduleAction, ScheduleInput } from '../shared/types.js';
+import type { Schedule, ScheduleInput } from '../shared/types.js';
+import { cleanAction, cleanTarget } from './action.js';
 
 interface StoreFile {
   version: 1;
@@ -21,37 +22,6 @@ function cleanDays(value: unknown): number[] {
   return [...new Set(value.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort(
     (a, b) => a - b,
   );
-}
-
-/**
- * Drop action fields that are absent or malformed.
- *
- * Only the keys actually present are applied when a schedule fires, so an
- * undefined that survived into the file would otherwise turn into "set
- * brightness to NaN" against real hardware.
- */
-function cleanAction(value: unknown): ScheduleAction {
-  const raw = (value ?? {}) as Record<string, unknown>;
-  const action: ScheduleAction = {};
-  if (typeof raw['power'] === 'boolean') action.power = raw['power'];
-  if (typeof raw['effect'] === 'string' && raw['effect'] !== '') {
-    action.effect = raw['effect'];
-  }
-  if (typeof raw['brightness'] === 'number' && Number.isFinite(raw['brightness'])) {
-    action.brightness = Math.min(100, Math.max(0, Math.round(raw['brightness'])));
-  }
-  return action;
-}
-
-function cleanTarget(value: unknown): Schedule['target'] | undefined {
-  const raw = value as Schedule['target'] | undefined;
-  if (raw?.kind === 'device' && typeof raw.serialNo === 'string') {
-    return { kind: 'device', serialNo: raw.serialNo };
-  }
-  if (raw?.kind === 'room' && typeof raw.roomId === 'string') {
-    return { kind: 'room', roomId: raw.roomId };
-  }
-  return undefined;
 }
 
 /**

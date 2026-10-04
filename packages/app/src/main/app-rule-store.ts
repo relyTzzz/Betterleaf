@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { app } from 'electron';
+import { cleanAction, cleanTarget } from './action.js';
 import { normaliseEntry } from './process-watch.js';
 import type { AppRule, AppRuleInput, ScheduleAction } from '../shared/types.js';
 
@@ -17,6 +18,17 @@ export interface CapturedDevice {
   on: boolean;
   brightness: number;
   effect: string;
+  /**
+   * The colour, for a light showing one rather than a scene.
+   *
+   * Optional because holds written before colours existed do not have them. A
+   * light on a solid colour reports a pseudo-scene (`*Solid*`) that cannot be
+   * selected, so without these there would be nothing to put back.
+   */
+  colorMode?: string;
+  hue?: number;
+  sat?: number;
+  ct?: number;
 }
 
 /** A rule currently holding a target, and what to put back afterwards. */
@@ -34,30 +46,6 @@ interface StoreFile {
   version: 1;
   rules: AppRule[];
   holds: Hold[];
-}
-
-function cleanAction(value: unknown): ScheduleAction {
-  const raw = (value ?? {}) as Record<string, unknown>;
-  const action: ScheduleAction = {};
-  if (typeof raw['power'] === 'boolean') action.power = raw['power'];
-  if (typeof raw['effect'] === 'string' && raw['effect'] !== '') {
-    action.effect = raw['effect'];
-  }
-  if (typeof raw['brightness'] === 'number' && Number.isFinite(raw['brightness'])) {
-    action.brightness = Math.min(100, Math.max(0, Math.round(raw['brightness'])));
-  }
-  return action;
-}
-
-function cleanTarget(value: unknown): AppRule['target'] | undefined {
-  const raw = value as AppRule['target'] | undefined;
-  if (raw?.kind === 'device' && typeof raw.serialNo === 'string') {
-    return { kind: 'device', serialNo: raw.serialNo };
-  }
-  if (raw?.kind === 'room' && typeof raw.roomId === 'string') {
-    return { kind: 'room', roomId: raw.roomId };
-  }
-  return undefined;
 }
 
 /**

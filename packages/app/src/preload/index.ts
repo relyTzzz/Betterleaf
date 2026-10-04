@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { clipboard, contextBridge, ipcRenderer } from 'electron';
 import { IPC, type AppSnapshot, type BetterleafApi, type PairProgress } from '../shared/types.js';
 
 /**
@@ -39,6 +39,18 @@ const api: BetterleafApi = {
     ipcRenderer.invoke(IPC.setAppRuleEnabled, id, enabled),
   reorderAppRules: (ids) => ipcRenderer.invoke(IPC.reorderAppRules, ids),
   listRunningApps: () => ipcRenderer.invoke(IPC.listRunningApps),
+
+  createHook: (input) => ipcRenderer.invoke(IPC.createHook, input),
+  updateHook: (id, input) => ipcRenderer.invoke(IPC.updateHook, id, input),
+  deleteHook: (id) => ipcRenderer.invoke(IPC.deleteHook, id),
+  setHookEnabled: (id, enabled) => ipcRenderer.invoke(IPC.setHookEnabled, id, enabled),
+  reorderHooks: (ids) => ipcRenderer.invoke(IPC.reorderHooks, ids),
+  testHook: (id) => ipcRenderer.invoke(IPC.testHook, id),
+  clearHookSources: () => ipcRenderer.invoke(IPC.clearHookSources),
+  setHookServer: (enabled, port) => ipcRenderer.invoke(IPC.setHookServer, enabled, port),
+  // Electron's clipboard rather than the web one, which refuses whenever the
+  // window does not have focus.
+  copyText: (text) => clipboard.writeText(text),
 
   setDeviceLocked: (serialNo, locked) =>
     ipcRenderer.invoke(IPC.setDeviceLocked, serialNo, locked),
